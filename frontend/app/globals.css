@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  물류 원장(Warehouse Ledger) 토큰
+  ── 색은 여기 한 곳에서만 정의하고 tailwind.config 를 통해 노출한다.
+*/
+:root {
+  --paper: #eceee8; /* 본문 배경 · 따뜻한 세이지 페이퍼 */
+  --surface: #fbfbf8; /* 카드·표 표면 */
+  --surface-2: #f2f4ee; /* 표 헤더·옅은 채움 */
+  --line: #dadfd4; /* 헤어라인 경계 */
+  --line-strong: #c8cec1;
+
+  --ink: #17242a; /* 본문 텍스트 · 잉크틸 */
+  --ink-2: #4d5a5e; /* 보조 텍스트 */
+  --ink-3: #8b958f; /* 흐린 라벨 */
+
+  --brand: #0f6e5a; /* 파인그린 · 주 강조 */
+  --brand-strong: #0b5748;
+  --brand-tint: #e2ede9; /* 옅은 그린 배경 */
+
+  --freight: #c2622c; /* 운송 오렌지 · 주의 */
+  --freight-tint: #f6e9dd;
+
+  --danger: #b23b32; /* 브릭 레드 · 위험 */
+  --danger-tint: #f5e2df;
+
+  --rail: #16262b; /* 사이드바 다크 레일 */
+  --rail-2: #1e3238;
+  --rail-line: rgba(255, 255, 255, 0.08);
+  --rail-ink: #e7ece9;
+  --rail-dim: #93a6a0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+@layer components {
+  /* 모든 화면 상단의 공통 라벨 — 원장의 "장부 구분" 눈썹 */
+  .eyebrow {
+    font-family: var(--font-mono), monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  /* 숫자·코드는 항상 고정폭 tabular — 이 앱의 시그니처 */
+  .num {
+    font-family: var(--font-mono), monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+}
+
+/* 접근성: 키보드 포커스는 항상 보이게, 모션 축소 존중 */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

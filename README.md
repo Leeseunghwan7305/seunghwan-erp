@@ -60,22 +60,19 @@ DB 데이터를 완전히 초기화하려면 `docker compose down -v`로 볼륨�
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | DB 접속 정보 | `erp` |
 | `SEED_ON_START` | 기동 시 샘플 데이터 삽입 여부 | `true` |
 | `NEXT_PUBLIC_API_URL` | 브라우저에서 호출할 API 주소(호스트 기준) | `http://localhost:8000` |
-| `CLAUDE_SESSION_KEY` 외 | claude.ai 구독 쿠키 (있으면 우선 사용, 추가 과금 없음) | *(비어 있음)* |
-| `ANTHROPIC_API_KEY` | 공식 Claude API 키 (쿠키 없을 때 폴백, 사용량 과금) | *(비어 있음)* |
+| `ANTHROPIC_API_KEY` | Claude API 키 (사용량 과금) | *(비어 있음)* |
 | `CLAUDE_MODEL` | Claude 모델명 | `claude-sonnet-5` |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | 로컬 LLM 서버·모델 태그 | `http://localhost:11434` / `qwen2.5:7b` |
 
 ## AI 챗봇 설정
 
-챗봇은 `POST /chat`의 `model` 값에 따라 세 경로로 라우팅됩니다.
+챗봇은 `POST /chat`의 `model` 값에 따라 두 경로로 라우팅됩니다.
 
 | 경로 | 조건 | 비고 |
 |------|------|------|
-| **① 구독 쿠키** | `model: "claude"` + `CLAUDE_SESSION_KEY` 있음 | claude.ai 세션으로 호출 — **추가 과금 없음** |
-| **② 공식 API** | `model: "claude"` + 쿠키 없음 | `ANTHROPIC_API_KEY`로 정식 tool-use (사용량 과금) |
-| **③ 로컬** | `model: "local"` | Ollama(`qwen2.5:7b`) — httpx로 `/api/chat` 호출 |
+| **① Claude API** | `model: "claude"` | `ANTHROPIC_API_KEY`로 정식 tool-use (사용량 과금) |
+| **② 로컬** | `model: "local"` | Ollama(`qwen2.5:7b`) — httpx로 `/api/chat` 호출 |
 
-- **쿠키 얻는 법:** claude.ai 로그인 → `F12` → Application → Cookies에서 값 복사 후 `.env`에 입력.
 - **로컬 실행:** 호스트에서 `ollama serve` + `ollama pull qwen2.5:7b`. 컨테이너에서 호스트 Ollama를 쓰려면 `OLLAMA_BASE_URL=http://host.docker.internal:11434`로 지정.
 - **도구(Phase A, 조회 전용):** `get_dashboard`, `get_inventory`, `list_orders`, `list_partners`. 하나의 도구 정의를 Claude·Ollama 규격으로 각각 변환해 재사용합니다. LLM은 응답을 SSE로 스트리밍하며, 최대 6회까지 도구 호출을 반복합니다.
 
@@ -119,7 +116,7 @@ seunghwan-erp/
 │       ├── schemas.py          # 요청/응답 스키마
 │       ├── seed.py             # 샘플 데이터
 │       ├── routers/            # dashboard · items · partners · orders · employees · accounts · expenses
-│       └── chat/               # AI 챗봇: router(SSE) · providers(라우팅) · tools · claude_cookie
+│       └── chat/               # AI 챗봇: router(SSE) · providers(라우팅) · tools
 └── frontend/
     ├── Dockerfile
     ├── package.json

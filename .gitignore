@@ -1,0 +1,23 @@
+# Env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+npm-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Playwright MCP 세션 산출물(스냅샷·콘솔로그·스크린샷)
+.playwright-mcp/

@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>유통/도소매 ERP 프로토타입 기획서</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --surface-2: #1e222b;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --text-dim: #9aa2af;
+    --accent: #5b8def;
+    --accent-soft: rgba(91,141,239,0.12);
+    --green: #3fb984;
+    --amber: #e0a94b;
+    --red: #e0685b;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --surface-2: #f0f2f5;
+      --border: #e2e5ea;
+      --text: #1a1d23;
+      --text-dim: #5c636e;
+      --accent: #2f6fe0;
+      --accent-soft: rgba(47,111,224,0.08);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1115; --surface: #171a21; --surface-2: #1e222b;
+    --border: #2a2f3a; --text: #e6e8ec; --text-dim: #9aa2af;
+    --accent: #5b8def; --accent-soft: rgba(91,141,239,0.12);
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5;
+    --border: #e2e5ea; --text: #1a1d23; --text-dim: #5c636e;
+    --accent: #2f6fe0; --accent-soft: rgba(47,111,224,0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.doc {
+    padding: 40px 0 32px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  h1 { font-size: 34px; line-height: 1.25; margin: 0 0 12px; letter-spacing: -0.02em; }
+  .subtitle { color: var(--text-dim); font-size: 16px; margin: 0; }
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 20px 40px;
+    margin-top: 28px; font-size: 14px;
+  }
+  .meta-row div span { display: block; }
+  .meta-label { color: var(--text-dim); font-size: 12px; margin-bottom: 2px; }
+  .meta-value { font-weight: 600; }
+
+  section { margin-bottom: 48px; scroll-margin-top: 24px; }
+  h2 {
+    font-size: 22px; letter-spacing: -0.01em;
+    margin: 0 0 20px; padding-bottom: 10px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 8px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 15px; font-weight: 700; flex-shrink: 0;
+  }
+  h3 { font-size: 16px; margin: 24px 0 10px; }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  .dim { color: var(--text-dim); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    margin-bottom: 16px;
+  }
+  .grid { display: grid; gap: 16px; }
+  .grid-2 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+  .module-card { position: relative; overflow: hidden; }
+  .module-card .tag {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+    color: var(--accent); text-transform: uppercase;
+  }
+  .module-card h3 { margin: 6px 0 12px; font-size: 17px; }
+  .module-card ul { font-size: 14px; color: var(--text-dim); padding-left: 18px; }
+  .module-card li { margin-bottom: 4px; }
+
+  /* flow diagram */
+  .flow {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px; justify-content: center;
+  }
+  .flow .node {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 16px; font-weight: 600; font-size: 14px;
+    text-align: center; min-width: 90px;
+  }
+  .flow .node small { display: block; color: var(--text-dim); font-weight: 400; font-size: 11px; margin-top: 2px; }
+  .flow .arrow { color: var(--accent); font-size: 18px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--border); }
+  th { background: var(--surface-2); font-weight: 600; font-size: 13px; color: var(--text-dim); white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td code { background: var(--surface-2); padding: 1px 6px; border-radius: 5px; font-size: 12.5px; }
+
+  .pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; }
+  .pill.p1 { background: rgba(224,104,91,0.15); color: var(--red); }
+  .pill.p2 { background: rgba(224,169,75,0.15); color: var(--amber); }
+  .pill.p3 { background: rgba(63,185,132,0.15); color: var(--green); }
+
+  .check li { list-style: none; position: relative; padding-left: 26px; }
+  .check { padding-left: 0; }
+  .check li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+  .cross li { list-style: none; position: relative; padding-left: 26px; }
+  .cross { padding-left: 0; }
+  .cross li::before { content: "✕"; position: absolute; left: 0; color: var(--red); font-weight: 700; }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 14px 18px; border-radius: 0 8px 8px 0; font-size: 14px;
+  }
+  .timeline { position: relative; padding-left: 28px; }
+  .timeline::before { content: ""; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 2px; background: var(--border); }
+  .timeline .step { position: relative; margin-bottom: 22px; }
+  .timeline .step::before {
+    content: ""; position: absolute; left: -28px; top: 4px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--surface); border: 3px solid var(--accent);
+  }
+  .timeline .step .wk { font-size: 12px; font-weight: 700; color: var(--accent); }
+  footer.doc { border-top: 1px solid var(--border); padding-top: 24px; color: var(--text-dim); font-size: 13px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc">
+    <span class="eyebrow">Prototype Planning · 기획서</span>
+    <h1>유통/도소매 ERP 프로토타입 기획서</h1>
+    <p class="subtitle">본 개발 착수 전, 핵심 업무 흐름과 화면·데이터 구조를 값싸게 검증하기 위한 프로토타입 기획 문서</p>
+    <div class="meta-row">
+      <div><span class="meta-label">업종</span><span class="meta-value">유통 / 도소매</span></div>
+      <div><span class="meta-label">문서 버전</span><span class="meta-value">v0.1 (Draft)</span></div>
+      <div><span class="meta-label">작성일</span><span class="meta-value">2026-09-16</span></div>
+      <div><span class="meta-label">목표</span><span class="meta-value">2~3주 내 클릭 가능한 프로토타입</span></div>
+    </div>
+  </header>
+
+  <!-- 1. 목적 -->
+  <section>
+    <h2><span class="num">1</span>프로토타입의 목적</h2>
+    <p>완제품이 아니라 <strong>가설을 검증하기 위한 도구</strong>입니다. 실제 ERP 구축은 비용과 시간이 크므로, 그 전에 아래 질문에 대한 답을 저비용으로 확인합니다.</p>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>검증하려는 것 (In-Scope)</h3>
+        <ul class="check">
+          <li>핵심 업무 흐름(구매→재고→판매→정산)이 실제 현장과 맞는가</li>
+          <li>주요 화면 구성·용어가 사용자에게 자연스러운가</li>
+          <li>모듈 간 데이터 연결(재고 자동 반영 등)이 이해되는가</li>
+          <li>필수 입력 항목이 과하거나 부족하지 않은가</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>지금은 하지 않는 것 (Out-of-Scope)</h3>
+        <ul class="cross">
+          <li>실제 DB·서버 연동, 대량 데이터 처리 성능</li>
+          <li>권한·보안·감사 로그 등 운영 기능</li>
+          <li>세금계산서 국세청 전송, 실 결제/은행 연동</li>
+          <li>모바일 앱, 다국어, 정교한 예외 처리</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">프로토타입은 <strong>샘플(시드) 데이터</strong>로 시작합니다. FastAPI + PostgreSQL로 실제 저장·조회는 되지만, 데이터 규모·정합성·운영 안정성은 본 개발에서 확보합니다.</div>
+  </section>
+
+  <!-- 2. 데이터 흐름 -->
+  <section>
+    <h2><span class="num">2</span>핵심 데이터 흐름</h2>
+    <p>유통/도소매 ERP는 아래 순환 고리로 돌아갑니다. 한 모듈의 행동이 다음 모듈의 데이터를 바꿉니다.</p>
+    <div class="flow">
+      <div class="node">품목 등록<small>기준정보</small></div>
+      <span class="arrow">→</span>
+      <div class="node">구매(발주)<small>입고</small></div>
+      <span class="arrow">→</span>
+      <div class="node">재고<small>수량 증가</small></div>
+      <span class="arrow">→</span>
+      <div class="node">판매(수주)<small>출고</small></div>
+      <span class="arrow">→</span>
+      <div class="node">재고<small>수량 감소</small></div>
+      <span class="arrow">→</span>
+      <div class="node">회계/정산<small>매입·매출</small></div>
+    </div>
+    <p class="dim" style="margin-top:14px;">※ 인사/근태는 위 거래 흐름과 별개로 조직·직원 기준정보를 제공하며, 담당자 지정·급여 계산에 연결됩니다.</p>
+  </section>
+
+  <!-- 3. 모듈 -->
+  <section>
+    <h2><span class="num">3</span>프로토타입 대상 모듈</h2>
+    <div class="grid grid-2">
+      <div class="card module-card">
+        <span class="tag">Module A</span>
+        <h3>재고 / 품목 관리</h3>
+        <ul>
+          <li>품목 등록 (코드, 명, 단위, 매입가/판매가)</li>
+          <li>입·출고 내역 기록</li>
+          <li>창고별·품목별 현재 재고 현황</li>
+          <li>안전재고 미달 알림(표시만)</li>
+        </ul>
+      </div>
+      <div class="card module-card">
+        <span class="tag">Module B</span>
+        <h3>구매 / 판매 (주문)</h3>
+        <ul>
+          <li>거래처(공급처·고객) 관리</li>
+          <li>발주서(구매) / 수주서(판매) 작성</li>
+          <li>주문 상태: 작성 → 확정 → 입/출고 완료</li>
+          <li>확정 시 재고에 자동 반영(프로토타입 로직)</li>
+        </ul>
+      </div>
+      <div class="card module-card">
+        <span class="tag">Module C</span>
+        <h3>회계 / 정산</h3>
+        <ul>
+          <li>매입·매출 전표 자동 생성(주문 연동)</li>
+          <li>거래처별 미수금·미지급금 집계</li>
+          <li>일자별 매출 요약 대시보드</li>
+          <li>세금계산서 양식 미리보기(발행은 제외)</li>
+        </ul>
+      </div>
+      <div class="card module-card">
+        <span class="tag">Module D</span>
+        <h3>인사 / 근태</h3>
+        <ul>
+          <li>직원·조직(부서) 등록</li>
+          <li>출퇴근/근태 기록</li>
+          <li>월 근태 집계</li>
+          <li>급여 항목 기반 급여 미리계산(표시)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 화면 목록 -->
+  <section>
+    <h2><span class="num">4</span>화면(스크린) 목록 &amp; 우선순위</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>#</th><th>화면</th><th>모듈</th><th>주요 기능</th><th>우선순위</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>대시보드</td><td>공통</td><td>매출·재고·미수금 요약 카드</td><td><span class="pill p1">P1</span></td></tr>
+          <tr><td>2</td><td>품목 목록/등록</td><td>재고</td><td>품목 CRUD, 검색</td><td><span class="pill p1">P1</span></td></tr>
+          <tr><td>3</td><td>재고 현황</td><td>재고</td><td>품목별 재고, 입출고 이력</td><td><span class="pill p1">P1</span></td></tr>
+          <tr><td>4</td><td>거래처 관리</td><td>구매/판매</td><td>공급처·고객 목록</td><td><span class="pill p1">P1</span></td></tr>
+          <tr><td>5</td><td>발주(구매) 작성</td><td>구매/판매</td><td>발주서 작성 → 입고 처리</td><td><span class="pill p1">P1</span></td></tr>
+          <tr><td>6</td><td>수주(판매) 작성</td><td>구매/판매</td><td>수주서 작성 → 출고 처리</td><td><span class="pill p1">P1</span></td></tr>
+          <tr><td>7</td><td>매입·매출 정산</td><td>회계</td><td>전표 목록, 미수/미지급</td><td><span class="pill p2">P2</span></td></tr>
+          <tr><td>8</td><td>세금계산서 미리보기</td><td>회계</td><td>양식 렌더링</td><td><span class="pill p3">P3</span></td></tr>
+          <tr><td>9</td><td>직원/조직 관리</td><td>인사</td><td>직원 목록, 부서</td><td><span class="pill p2">P2</span></td></tr>
+          <tr><td>10</td><td>근태 기록</td><td>인사</td><td>출퇴근, 월 집계</td><td><span class="pill p3">P3</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="dim" style="margin-top:12px;"><span class="pill p1">P1</span> 프로토타입 1차 필수 &nbsp; <span class="pill p2">P2</span> 여력 시 포함 &nbsp; <span class="pill p3">P3</span> 데모용 화면만</p>
+  </section>
+
+  <!-- 5. 데이터 모델 -->
+  <section>
+    <h2><span class="num">5</span>주요 데이터 항목 (개략)</h2>
+    <p>프로토타입 단계의 최소 필드만 정의합니다. 정규화·제약조건은 본 개발에서 확정합니다.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>엔티티</th><th>핵심 필드</th><th>연결</th></tr></thead>
+        <tbody>
+          <tr><td><strong>품목</strong> Item</td><td><code>id, 코드, 품명, 단위, 매입가, 판매가, 안전재고</code></td><td>재고, 주문항목</td></tr>
+          <tr><td><strong>재고</strong> Stock</td><td><code>품목id, 창고, 현재수량</code></td><td>품목</td></tr>
+          <tr><td><strong>거래처</strong> Partner</td><td><code>id, 상호, 구분(공급/고객), 연락처, 사업자번호</code></td><td>주문</td></tr>
+          <tr><td><strong>주문</strong> Order</td><td><code>id, 유형(구매/판매), 거래처id, 일자, 상태, 합계</code></td><td>거래처, 주문항목</td></tr>
+          <tr><td><strong>주문항목</strong> OrderLine</td><td><code>주문id, 품목id, 수량, 단가, 금액</code></td><td>주문, 품목</td></tr>
+          <tr><td><strong>전표</strong> Voucher</td><td><code>id, 유형(매입/매출), 주문id, 금액, 결제상태</code></td><td>주문</td></tr>
+          <tr><td><strong>직원</strong> Employee</td><td><code>id, 성명, 부서, 직급, 입사일</code></td><td>근태, 주문담당</td></tr>
+          <tr><td><strong>근태</strong> Attendance</td><td><code>직원id, 일자, 출근, 퇴근, 근무시간</code></td><td>직원</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 6. 기술 -->
+  <section>
+    <h2><span class="num">6</span>제작 방식 (프로토타입 한정)</h2>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>프론트엔드</h3>
+        <ul>
+          <li><strong>Next.js (App Router) + React + TypeScript</strong></li>
+          <li><strong>Tailwind 등 유틸 CSS</strong> — 일관된 UI 빠르게</li>
+          <li>서버 상태: <strong>fetch / TanStack Query</strong>로 API 호출</li>
+          <li>화면 렌더링·주문 입력·대시보드 담당</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>백엔드</h3>
+        <ul>
+          <li><strong>FastAPI (Python)</strong> — REST API 서버</li>
+          <li><strong>Pydantic</strong> 스키마로 요청/응답 검증</li>
+          <li>데이터: <strong>PostgreSQL + SQLModel/SQLAlchemy</strong>, 마이그레이션은 <strong>Alembic</strong></li>
+          <li>재고 자동 반영·정산 계산 등 비즈니스 로직 담당</li>
+        </ul>
+      </div>
+    </div>
+    <div class="table-scroll" style="margin-top:16px;">
+      <table>
+        <thead><tr><th>구분</th><th>역할</th><th>기술</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Frontend</strong></td><td>화면·UX, 사용자 입력</td><td>Next.js, React, TypeScript, Tailwind</td></tr>
+          <tr><td><strong>API</strong></td><td>프론트 ↔ 백엔드 통신</td><td>REST (JSON) · FastAPI 자동 문서(<code>/docs</code>)</td></tr>
+          <tr><td><strong>Backend</strong></td><td>비즈니스 로직·데이터</td><td>FastAPI, Pydantic, SQLModel, Alembic</td></tr>
+          <tr><td><strong>DB</strong></td><td>데이터 저장</td><td>PostgreSQL 16</td></tr>
+          <tr><td><strong>인프라</strong></td><td>로컬 개발·구동</td><td>Docker Compose (web · api · db 3개 컨테이너)</td></tr>
+          <tr><td><strong>배포</strong></td><td>공유·피드백</td><td>프론트: Vercel · 백엔드+DB: Railway/Render 등</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3 style="margin-top:24px;">Docker 구성</h3>
+    <p>전체를 <code>docker-compose.yml</code> 하나로 묶어 <code>docker compose up</code> 한 번에 실행합니다. 로컬 환경 편차 없이 누구나 동일하게 구동·피드백할 수 있습니다.</p>
+    <div class="flow">
+      <div class="node">web<small>Next.js :3000</small></div>
+      <span class="arrow">→</span>
+      <div class="node">api<small>FastAPI :8000</small></div>
+      <span class="arrow">→</span>
+      <div class="node">db<small>PostgreSQL :5432</small></div>
+    </div>
+    <ul style="margin-top:14px;">
+      <li><strong>web</strong> — Next.js 개발 서버, <code>api</code>로 요청 프록시</li>
+      <li><strong>api</strong> — FastAPI(uvicorn), 시작 시 Alembic 마이그레이션 실행</li>
+      <li><strong>db</strong> — PostgreSQL, 데이터는 <strong>볼륨(volume)</strong>에 영속 저장</li>
+      <li>환경변수는 <code>.env</code>로 관리(DB 접속정보·시드 여부 등)</li>
+    </ul>
+    <div class="callout" style="margin-top:16px;">
+      <strong>프로토타입 원칙</strong> — 화면 흐름과 모듈 간 데이터 연동(주문 확정 → 재고·정산 자동 반영) 검증이 최우선입니다.
+      FastAPI + PostgreSQL로 실제 API·DB를 두고 Docker로 묶되, 인증·권한·성능 최적화는 본 개발로 미룹니다. "진짜처럼 도는 흐름" &gt; "완벽한 기능".
+    </div>
+  </section>
+
+  <!-- 7. 일정 -->
+  <section>
+    <h2><span class="num">7</span>진행 일정 (예시, 2~3주)</h2>
+    <div class="timeline">
+      <div class="step"><div class="wk">Week 1</div><strong>기준정보 + 재고</strong><br><span class="dim">품목·거래처 등록, 재고 현황, 대시보드 골격 (P1 일부)</span></div>
+      <div class="step"><div class="wk">Week 2</div><strong>주문 흐름 연결</strong><br><span class="dim">발주/수주 작성 → 재고 자동 반영, 매입·매출 정산 (P1 완성 + P2)</span></div>
+      <div class="step"><div class="wk">Week 3</div><strong>인사/근태 + 다듬기</strong><br><span class="dim">직원·근태 화면, 세금계산서 미리보기, 피드백 반영·데모 준비 (P2·P3)</span></div>
+    </div>
+  </section>
+
+  <!-- 8. 성공 기준 -->
+  <section>
+    <h2><span class="num">8</span>성공 기준 &amp; 다음 단계</h2>
+    <div class="card">
+      <h3>프로토타입이 성공했다고 볼 조건</h3>
+      <ul class="check">
+        <li>사용자가 발주→입고→수주→출고를 클릭만으로 끝까지 시연 가능</li>
+        <li>주문 확정 시 재고·정산 수치가 자동으로 맞게 변함</li>
+        <li>현장 담당자가 화면·용어에 대해 "이해된다"고 확인</li>
+        <li>본 개발에 필요한 요구사항·수정점 목록이 도출됨</li>
+      </ul>
+    </div>
+    <div class="callout" style="margin-top:16px;">
+      <strong>다음 단계 →</strong> 프로토타입 피드백을 반영해 정식 요구사항 정의서(SRS)와 DB 설계를 확정하고, 실제 백엔드·인증·권한을 포함한 본 개발에 착수합니다.
+    </div>
+  </section>
+
+  <footer class="doc">
+    유통/도소매 ERP 프로토타입 기획서 · v0.1 Draft · 2026-09-16 — 본 문서는 프로토타입 범위 합의를 위한 초안이며, 논의에 따라 수정됩니다.
+  </footer>
+
+</div>
+</body>
+</html>
