@@ -229,13 +229,19 @@ export default function DashboardPage() {
 /* ── 파생 데이터 ── */
 
 function inventoryRows(items: Item[]): BarRow[] {
-  return items.map((it) => ({
-    label: it.name,
-    value: it.quantity,
-    marker: it.safety_stock,
-    tone: it.below_safety ? "danger" : "brand",
-    pill: it.below_safety ? { text: "미달", tone: "danger" } : undefined,
-  }));
+  // 미달 품목 먼저, 그다음 수량 많은 순 — 대시보드는 주의 대상을 위로.
+  return [...items]
+    .sort((a, b) => {
+      if (a.below_safety !== b.below_safety) return a.below_safety ? -1 : 1;
+      return b.quantity - a.quantity;
+    })
+    .map((it) => ({
+      label: it.name,
+      value: it.quantity,
+      marker: it.safety_stock,
+      tone: it.below_safety ? "danger" : "brand",
+      pill: it.below_safety ? { text: "미달", tone: "danger" } : undefined,
+    }));
 }
 
 function assetRows(items: Item[]): BarRow[] {
