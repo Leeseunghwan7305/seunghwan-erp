@@ -30,16 +30,28 @@ def _doc_context(messages: list[dict]) -> str:
 
     return context_for(_last_user_text(messages))
 
+
+# 엄격 근거 모드: 문서도 도구도 근거로 쓰지 않고 모델이 자기 지식으로만 답하는 것을 막는다.
+# (RAG_STRICT=false 로 끌 수 있음)
+STRICT_GROUNDING = os.getenv("RAG_STRICT", "true").lower() == "true"
+NO_GROUND_MSG = "문서에서 찾을 수 없습니다."
+
+
+def _guard_answer(text: str, has_doc: bool, used_tool: bool) -> str:
+    """근거(문서 주입/도구 호출)가 하나도 없으면 자체 지식 답변을 막고 정형 문구로 대체."""
+    if STRICT_GROUNDING and not has_doc and not used_tool:
+        return NO_GROUND_MSG
+    return text
+
 SYSTEM_PROMPT = (
     "너는 제조 ERP의 업무 보조 AI다.\n"
-    "- 재고·주문·거래처·정산·매출 등 '현재 수치·현황'은 참고 문서에 비슷한 값이 있더라도 무시하고 "
-    "반드시 도구(get_dashboard, get_inventory, list_orders, list_partners)로 라이브 조회해 답하라. "
-    "도구가 최신이고 문서 스냅샷은 과거 값일 수 있다.\n"
-    "- 그 외 규정·용어·조직·인물·메모 등 지식 질문은 아래 '참고 문서'가 있으면 그 내용을 근거로 답하라. "
-    "참고 문서가 없거나 관련 내용이 없으면 search_documents 도구로 추가 검색하고, 그래도 없으면 "
-    "지어내지 말고 '문서에서 찾을 수 없습니다'라고 답하라. "
-    "문서를 근거로 답할 때는 답변 맨 끝에 줄을 바꿔 '(출처: 문서제목)'을 반드시 표기하라. "
-    "도구(라이브 데이터)로 답한 경우에는 출처를 붙이지 마라.\n"
+    "- 아래 '참고 문서'에 질문의 답이 있으면 반드시 그 문서 내용을 근거로 답하라. 문서에 적힌 "
+    "숫자(나이·가격 등)도 그대로 문서 값을 쓰고, 답변 맨 끝에 줄을 바꿔 '(출처: 문서제목)'을 표기하라.\n"
+    "- 재고 수량·주문 내역·매출/미수금/미지급금 등 실시간 ERP 운영 현황은 문서가 아니라 반드시 "
+    "도구(get_dashboard, get_inventory, list_orders, list_partners)로 라이브 조회해 답하라. "
+    "이때는 출처를 붙이지 마라.\n"
+    "- 문서에 적힌 내용만 사용하고, 문서에 없는 배경지식·정의·수치를 지어내 덧붙이지 마라. "
+    "문서에도 없고 도구로도 얻을 수 없는 것은 지어내지 말고 '문서에서 찾을 수 없습니다'라고만 답하라.\n"
     "- 추측 금지. 금액은 원(₩) 단위로 읽기 쉽게 표시하라. 한국어로 간결하게 답하라."
 )
 
@@ -78,7 +90,10 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
 
     client = Anthropic(api_key=api_key)
     model = model or os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
-    system = SYSTEM_PROMPT + _doc_context(messages)
+    doc_ctx = _doc_context(messages)
+    has_doc = bool(doc_ctx)
+    used_tool = False
+    system = SYSTEM_PROMPT + doc_ctx
     conv = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     for _ in range(MAX_TOOL_ROUNDS):
@@ -86,6 +101,7 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
             resp = client.messages.create(
                 model=model,
                 max_tokens=1024,
+                temperature=0,
                 system=system,
                 tools=_claude_tools(),
                 messages=conv,
@@ -97,10 +113,11 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
         tool_uses = [b for b in resp.content if b.type == "tool_use"]
         if not tool_uses:
             text = "".join(b.text for b in resp.content if b.type == "text")
-            yield {"type": "text", "content": text}
+            yield {"type": "text", "content": _guard_answer(text, has_doc, used_tool)}
             yield {"type": "done"}
             return
 
+        used_tool = True
         conv.append({"role": "assistant", "content": [b.model_dump() for b in resp.content]})
         results = []
         for tu in tool_uses:
@@ -121,14 +138,24 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
 def run_local(messages: list[dict], model: str | None = None) -> Iterator[dict]:
     base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     model = model or os.getenv("OLLAMA_MODEL", "qwen2.5")
-    conv: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT + _doc_context(messages)}]
+    doc_ctx = _doc_context(messages)
+    has_doc = bool(doc_ctx)
+    used_tool = False
+    conv: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT + doc_ctx}]
     conv += [{"role": m["role"], "content": m["content"]} for m in messages]
 
     for _ in range(MAX_TOOL_ROUNDS):
         try:
             r = httpx.post(
                 f"{base}/api/chat",
-                json={"model": model, "messages": conv, "tools": _ollama_tools(), "stream": False},
+                json={
+                    "model": model,
+                    "messages": conv,
+                    "tools": _ollama_tools(),
+                    "stream": False,
+                    # 문서 밖 내용을 지어내거나 섞지 않도록 결정적으로.
+                    "options": {"temperature": 0},
+                },
                 timeout=120.0,
             )
             r.raise_for_status()
@@ -143,10 +170,11 @@ def run_local(messages: list[dict], model: str | None = None) -> Iterator[dict]:
         msg = data.get("message", {})
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
-            yield {"type": "text", "content": msg.get("content", "")}
+            yield {"type": "text", "content": _guard_answer(msg.get("content", ""), has_doc, used_tool)}
             yield {"type": "done"}
             return
 
+        used_tool = True
         conv.append(msg)
         for tc in tool_calls:
             fn = tc.get("function", {})

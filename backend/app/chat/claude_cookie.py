@@ -49,11 +49,11 @@ def _retry_after_seconds(resp: httpx.Response, attempt: int) -> float:
     return min(_BACKOFF_BASE * (2 ** attempt), _BACKOFF_CAP)
 
 _PREAMBLE = (
-    "너는 제조 ERP의 업무 보조 AI다. 재고·주문·거래처·정산 질문에 답한다. "
-    "수치·현황이 필요하면 반드시 아래 도구로 실제 데이터를 조회한 뒤 답하라. "
-    "매뉴얼·규정·계약·업무 지식 등 '문서'에 관한 질문은 반드시 먼저 search_documents 도구로 검색하고, "
-    "검색 결과에 담긴 내용만 근거로 답하라. 검색 결과에 없으면 절대 지어내지 말고 "
-    "'문서에서 찾을 수 없습니다'라고 답하라. "
+    "너는 제조 ERP의 업무 보조 AI다.\n"
+    "- 아래 '참고 문서'에 질문의 답이 있으면 반드시 그 문서 내용을 근거로 답하고(숫자도 문서 값 그대로) "
+    "답변 맨 끝에 '(출처: 문서제목)'을 표기하라.\n"
+    "- 재고·주문·매출/미수금/미지급금 등 실시간 ERP 운영 현황은 문서가 아니라 아래 도구로 조회해 답하라(출처 없음).\n"
+    "- 문서에도 없고 도구로도 얻을 수 없으면 지어내지 말고 '문서에서 찾을 수 없습니다'라고만 답하라.\n"
     "추측하지 말고, 금액은 원(₩) 단위로 읽기 쉽게 표시하며 한국어로 간결히 답하라.\n\n"
 )
 
@@ -255,8 +255,12 @@ def run_claude_cookie(messages: list[dict]) -> Iterator[dict]:
     # 첫 프롬프트: 프리앰블 + 자동 문서 검색 근거 + 도구 규약 + 지금까지의 대화 이력
     from ..rag.retrieval import context_for
 
+    from .providers import _guard_answer
+
     last_user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
     doc_ctx = context_for(last_user)
+    has_doc = bool(doc_ctx)
+    used_tool = False
     history = "\n".join(
         f"{'사용자' if m['role'] == 'user' else 'AI'}: {m['content']}" for m in messages
     )
@@ -272,9 +276,10 @@ def run_claude_cookie(messages: list[dict]) -> Iterator[dict]:
                 text, parent = _completion(client, org_id, conv_id, prompt, parent)
                 call = _extract_tool_call(text)
                 if not call:
-                    yield {"type": "text", "content": text}
+                    yield {"type": "text", "content": _guard_answer(text, has_doc, used_tool)}
                     yield {"type": "done"}
                     return
+                used_tool = True
                 yield {"type": "tool", "name": call["name"], "input": call["input"]}
                 result = execute_tool(call["name"], call["input"])
                 time.sleep(_INTER_ROUND_DELAY)  # 연속 completion 버스트 완화(429 예방)
