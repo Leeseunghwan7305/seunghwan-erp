@@ -181,6 +181,13 @@ export interface RagSearchHit {
   score: number;
 }
 
+export interface RagDocumentContent {
+  id: number;
+  title: string;
+  chunk_count: number;
+  content: string;
+}
+
 async function uploadRagDocument(form: FormData): Promise<RagDocument> {
   // multipart 업로드 — request()의 JSON 헤더를 쓰지 않는다.
   const res = await fetch(`${BASE}/rag/documents`, { method: "POST", body: form });
@@ -232,6 +239,8 @@ export const api = {
   ragDocuments: () => request<RagDocument[]>("/rag/documents"),
   createRagDocument: (form: FormData) => uploadRagDocument(form),
   deleteRagDocument: (id: number) => del(`/rag/documents/${id}`),
+  ragDocumentContent: (id: number) =>
+    request<RagDocumentContent>(`/rag/documents/${id}/content`),
   ragSearch: (query: string, top_k = 5) =>
     post<{ results: RagSearchHit[] }>("/rag/search", { query, top_k }),
 };

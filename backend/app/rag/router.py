@@ -136,6 +136,39 @@ def list_documents():
         return [_to_read(d) for d in docs]
 
 
+def _join_chunks(parts: list[str]) -> str:
+    """청크를 순서대로 잇되, 인접 청크 간 오버랩(겹친 텍스트)을 제거해 원문처럼 재구성한다."""
+    acc = ""
+    for part in parts:
+        if not acc:
+            acc = part
+            continue
+        max_l = min(len(acc), len(part))
+        overlap = next((l for l in range(max_l, 0, -1) if acc[-l:] == part[:l]), 0)
+        acc += part[overlap:]
+    return acc
+
+
+@router.get("/documents/{document_id}/content")
+def get_document_content(document_id: int):
+    """문서의 저장된 청크를 순서대로 이어 붙여 전체 내용을 반환한다(웹 열람용)."""
+    with Session(engine) as session:
+        doc = session.get(Document, document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+        chunks = session.exec(
+            select(DocChunk)
+            .where(DocChunk.document_id == document_id)
+            .order_by(DocChunk.ordinal)
+        ).all()
+    return {
+        "id": doc.id,
+        "title": doc.title,
+        "chunk_count": doc.chunk_count,
+        "content": _join_chunks([c.content for c in chunks]),
+    }
+
+
 @router.delete("/documents/{document_id}", status_code=204)
 def delete_document(document_id: int):
     with Session(engine) as session:

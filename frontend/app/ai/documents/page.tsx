@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import PageHeader from "../../components/PageHeader";
 import Badge from "../../components/Badge";
-import { api, RagDocument, RagSearchHit, DocStatus, DocSourceType } from "../../lib/api";
+import {
+  api,
+  RagDocument,
+  RagDocumentContent,
+  RagSearchHit,
+  DocStatus,
+  DocSourceType,
+} from "../../lib/api";
 
 const STATUS: Record<DocStatus, { label: string; tone: "amber" | "green" | "red" }> = {
   indexing: { label: "색인 중", tone: "amber" },
@@ -258,6 +265,7 @@ function DocumentTable({
   onChanged: () => void;
 }) {
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<RagDocument | null>(null);
 
   const remove = async (d: RagDocument) => {
     if (!confirm(`"${d.title}" 문서를 삭제할까요?`)) return;
@@ -307,7 +315,17 @@ function DocumentTable({
                   className="border-b border-line text-ink transition-colors last:border-0 hover:bg-surface-2"
                 >
                   <td className="px-4 py-3">
-                    <span className="font-medium">{d.title}</span>
+                    {d.status === "ready" ? (
+                      <button
+                        onClick={() => setViewing(d)}
+                        className="font-medium text-brand-strong underline-offset-2 hover:underline"
+                        title="문서 내용 보기"
+                      >
+                        {d.title}
+                      </button>
+                    ) : (
+                      <span className="font-medium">{d.title}</span>
+                    )}
                     {d.status === "error" && d.error && (
                       <span className="mt-0.5 block text-[12px] text-danger">{d.error}</span>
                     )}
@@ -335,6 +353,76 @@ function DocumentTable({
             })}
           </tbody>
         </table>
+      </div>
+      {viewing && <ViewerModal doc={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+// ---- 문서 내용 열람 모달 ---------------------------------------------------
+
+function ViewerModal({ doc, onClose }: { doc: RagDocument; onClose: () => void }) {
+  const [data, setData] = useState<RagDocumentContent | null>(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .ragDocumentContent(doc.id)
+      .then((d) => alive && setData(d))
+      .catch((e) => alive && setErr((e as Error).message));
+    return () => {
+      alive = false;
+    };
+  }, [doc.id]);
+
+  // Esc로 닫기
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-card border border-line bg-surface shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-4 border-b border-line px-5 py-4">
+          <div>
+            <p className="eyebrow">지식 문서 · 내용</p>
+            <h3 className="mt-0.5 font-medium text-ink">{doc.title}</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-md px-2 py-1 text-lg leading-none text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+            aria-label="닫기"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-5 py-4">
+          {err && <p className="text-sm text-danger">내용을 불러오지 못했습니다: {err}</p>}
+          {!err && !data && <p className="text-sm text-ink-3">불러오는 중…</p>}
+          {data && (
+            <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-ink-2">
+              {data.content}
+            </pre>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-line px-5 py-3 text-[12px] text-ink-3">
+          <span>
+            {SOURCE_LABEL[doc.source_type]} · 청크 {doc.chunk_count}개 ·{" "}
+            {doc.char_count.toLocaleString("ko-KR")}자
+          </span>
+          <span className="text-ink-3">Esc로 닫기</span>
+        </div>
       </div>
     </div>
   );
