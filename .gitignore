@@ -14,6 +14,9 @@ node_modules/
 npm-debug.log*
 yarn-error.log*
 
+# TypeScript 증분 빌드 캐시
+*.tsbuildinfo
+
 # Editor / OS
 .DS_Store
 .vscode/
