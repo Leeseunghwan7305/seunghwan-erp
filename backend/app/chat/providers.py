@@ -57,6 +57,12 @@ SYSTEM_PROMPT = (
 
 MAX_TOOL_ROUNDS = 6
 
+# Claude 전용: 답변을 '답 + 출처'로만. 군더더기 금지.
+CLAUDE_TERSE = (
+    "\n- 답변은 '질문에 대한 답'과 '(출처: 제목)'만 출력하라. 인사·되묻기·부연 설명·"
+    "주의 문구 등 군더더기는 절대 붙이지 마라."
+)
+
 
 # ---- 도구 스키마 변환 -----------------------------------------------------
 
@@ -93,7 +99,7 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
     doc_ctx = _doc_context(messages)
     has_doc = bool(doc_ctx)
     used_tool = False
-    system = SYSTEM_PROMPT + doc_ctx
+    system = SYSTEM_PROMPT + CLAUDE_TERSE + doc_ctx
     conv = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     for _ in range(MAX_TOOL_ROUNDS):
