@@ -6,15 +6,18 @@ import DataTable, { Column } from "./DataTable";
 import StatCard from "./StatCard";
 import Modal from "./Modal";
 
+type Opt = { value: string; label: string };
+
 export type Field = {
   name: string;
   label: string;
-  type?: "text" | "number" | "select" | "date";
-  options?: { value: string; label: string }[];
+  type?: "text" | "number" | "select" | "date" | "checkboxes";
+  options?: Opt[];
+  loadOptions?: () => Promise<Opt[]>; // 동적 옵션(select/checkboxes)
   required?: boolean;
   placeholder?: string;
-  default?: string | number;
-  editableOnCreateOnly?: boolean; // 수정 시 비활성 (예: 코드)
+  default?: string | number | string[];
+  editableOnCreateOnly?: boolean;
 };
 
 export type CrudColumn<T> = {
@@ -25,6 +28,8 @@ export type CrudColumn<T> = {
 };
 
 export type Stat = { label: string; value: string; hint?: string; accent?: "red" | "amber" | "green" | "blue" };
+
+type Value = string | number | null | string[];
 
 const inputCls =
   "w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none";
@@ -55,11 +60,11 @@ export default function CrudManager<T>({
   columns: CrudColumn<T>[];
   fields: Field[];
   fetchList: () => Promise<T[]>;
-  create: (values: Record<string, string | number | null>) => Promise<unknown>;
-  update: (id: number, values: Record<string, string | number | null>) => Promise<unknown>;
+  create: (values: Record<string, Value>) => Promise<unknown>;
+  update: (id: number, values: Record<string, Value>) => Promise<unknown>;
   remove: (id: number) => Promise<void>;
   getId: (row: T) => number;
-  toForm: (row: T) => Record<string, string | number | null>;
+  toForm: (row: T) => Record<string, Value>;
   stats?: (rows: T[]) => Stat[];
 }) {
   const [rows, setRows] = useState<T[]>([]);
@@ -67,8 +72,9 @@ export default function CrudManager<T>({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<T | null>(null);
-  const [values, setValues] = useState<Record<string, string | number | null>>({});
+  const [values, setValues] = useState<Record<string, Value>>({});
   const [busy, setBusy] = useState(false);
+  const [dynOpts, setDynOpts] = useState<Record<string, Opt[]>>({});
 
   const load = () => {
     setLoading(true);
@@ -82,9 +88,27 @@ export default function CrudManager<T>({
   };
   useEffect(load, []);
 
+  // 동적 옵션(select/checkboxes) 로드
+  useEffect(() => {
+    fields.forEach((f) => {
+      if (f.loadOptions) {
+        f.loadOptions()
+          .then((opts) => setDynOpts((prev) => ({ ...prev, [f.name]: opts })))
+          .catch(() => {});
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const optsFor = (f: Field): Opt[] => f.options ?? dynOpts[f.name] ?? [];
+
   const openCreate = () => {
-    const init: Record<string, string | number | null> = {};
-    fields.forEach((f) => (init[f.name] = f.default ?? (f.type === "number" ? 0 : "")));
+    const init: Record<string, Value> = {};
+    fields.forEach((f) => {
+      if (f.type === "checkboxes") init[f.name] = (f.default as string[]) ?? [];
+      else if (f.type === "select") init[f.name] = f.default ?? optsFor(f)[0]?.value ?? "";
+      else init[f.name] = f.default ?? (f.type === "number" ? 0 : "");
+    });
     setValues(init);
     setEditing(null);
     setOpen(true);
@@ -99,10 +123,12 @@ export default function CrudManager<T>({
     e.preventDefault();
     setBusy(true);
     try {
-      const payload: Record<string, string | number | null> = {};
+      const payload: Record<string, Value> = {};
       fields.forEach((f) => {
         const v = values[f.name];
-        payload[f.name] = f.type === "number" ? Number(v || 0) : v === "" ? null : v;
+        if (f.type === "checkboxes") payload[f.name] = Array.isArray(v) ? v : [];
+        else if (f.type === "number") payload[f.name] = Number(v || 0);
+        else payload[f.name] = v === "" ? null : (v as Value);
       });
       if (editing) await update(getId(editing), payload);
       else await create(payload);
@@ -123,6 +149,16 @@ export default function CrudManager<T>({
     } catch (err) {
       alert((err as Error).message);
     }
+  };
+
+  const toggleCheckbox = (name: string, value: string) => {
+    setValues((prev) => {
+      const cur = Array.isArray(prev[name]) ? (prev[name] as string[]) : [];
+      return {
+        ...prev,
+        [name]: cur.includes(value) ? cur.filter((x) => x !== value) : [...cur, value],
+      };
+    });
   };
 
   const tableColumns: Column[] = [
@@ -202,6 +238,29 @@ export default function CrudManager<T>({
         <form onSubmit={submit} className="space-y-4">
           {fields.map((f) => {
             const disabled = f.editableOnCreateOnly && editing !== null;
+            if (f.type === "checkboxes") {
+              const cur = Array.isArray(values[f.name]) ? (values[f.name] as string[]) : [];
+              return (
+                <div key={f.name}>
+                  <span className="mb-1.5 block text-xs font-medium text-ink-2">{f.label}</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {optsFor(f).map((o) => (
+                      <label
+                        key={o.value}
+                        className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-ink"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={cur.includes(o.value)}
+                          onChange={() => toggleCheckbox(f.name, o.value)}
+                        />
+                        {o.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
             return (
               <label key={f.name} className="block">
                 <span className="mb-1.5 block text-xs font-medium text-ink-2">
@@ -216,7 +275,7 @@ export default function CrudManager<T>({
                     disabled={disabled}
                     onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
                   >
-                    {f.options?.map((o) => (
+                    {optsFor(f).map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
                       </option>

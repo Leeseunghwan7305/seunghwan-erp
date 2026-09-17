@@ -3,7 +3,7 @@ from datetime import date
 from sqlmodel import Session, select
 
 from .database import engine
-from .models import Account, Employee, Expense, Item, Partner, PartnerKind, Stock
+from .models import Account, Employee, Expense, Item, Partner, PartnerKind, Role, Stock
 
 
 def seed() -> None:
@@ -11,6 +11,18 @@ def seed() -> None:
     with Session(engine) as session:
         _seed_core(session)
         _seed_accounting(session)
+        _seed_roles(session)
+
+
+def _seed_roles(session: Session) -> None:
+    if session.exec(select(Role)).first():
+        return
+    session.add_all([
+        Role(name="관리자", description="전체 모듈 접근", permissions=["dashboard", "ai", "sales", "accounting", "hr", "admin"]),
+        Role(name="매니저", description="영업·회계·인사 접근", permissions=["dashboard", "sales", "accounting", "hr"]),
+        Role(name="일반사원", description="영업·AI 열람", permissions=["dashboard", "sales", "ai"]),
+    ])
+    session.commit()
 
 
 def _seed_core(session: Session) -> None:

@@ -89,12 +89,27 @@ export interface Employee {
   department?: string | null;
   position?: string | null;
   hire_date?: string | null;
+  role_id?: number | null;
+  role_name?: string | null;
 }
 export interface EmployeeIn {
   name: string;
   department?: string | null;
   position?: string | null;
   hire_date?: string | null;
+  role_id?: number | null;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  description?: string | null;
+  permissions: string[];
+}
+export interface RoleIn {
+  name: string;
+  description?: string | null;
+  permissions: string[];
 }
 
 export interface Account {
@@ -220,6 +235,11 @@ export const api = {
   createEmployee: (p: EmployeeIn) => post<Employee>("/employees", p),
   updateEmployee: (id: number, p: EmployeeIn) => put<Employee>(`/employees/${id}`, p),
   deleteEmployee: (id: number) => del(`/employees/${id}`),
+
+  roles: () => request<Role[]>("/roles"),
+  createRole: (p: RoleIn) => post<Role>("/roles", p),
+  updateRole: (id: number, p: RoleIn) => put<Role>(`/roles/${id}`, p),
+  deleteRole: (id: number) => del(`/roles/${id}`),
 
   accounts: () => request<Account[]>("/accounts"),
   createAccount: (p: AccountIn) => post<Account>("/accounts", p),

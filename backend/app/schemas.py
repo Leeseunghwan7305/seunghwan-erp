@@ -57,6 +57,25 @@ class EmployeeIn(SQLModel):
     department: Optional[str] = None
     position: Optional[str] = None
     hire_date: Optional[date] = None
+    role_id: Optional[int] = None
+
+
+class EmployeeRead(SQLModel):
+    id: int
+    name: str
+    department: Optional[str] = None
+    position: Optional[str] = None
+    hire_date: Optional[date] = None
+    role_id: Optional[int] = None
+    role_name: Optional[str] = None
+
+
+# ---- Role (권한) ----------------------------------------------------------
+
+class RoleIn(SQLModel):
+    name: str
+    description: Optional[str] = None
+    permissions: list[str] = []
 
 
 # ---- Account (계정과목) ---------------------------------------------------

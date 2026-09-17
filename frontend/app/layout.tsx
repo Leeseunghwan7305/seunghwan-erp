@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans_KR, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
-import Sidebar from "./components/Sidebar";
+import { AuthProvider } from "./components/AuthProvider";
+import Shell from "./components/Shell";
 
 // UI·한글 본문. 엔지니어링된 지오메트릭 산세 — 시스템 폰트 탈출.
 const sans = IBM_Plex_Sans_KR({
@@ -32,12 +33,9 @@ export default function RootLayout({
   return (
     <html lang="ko" className={`${sans.variable} ${mono.variable}`}>
       <body>
-        <div className="min-h-screen flex">
-          <Sidebar />
-          <main className="flex-1 min-w-0 px-8 py-9 md:px-12">
-            <div className="mx-auto max-w-6xl">{children}</div>
-          </main>
-        </div>
+        <AuthProvider>
+          <Shell>{children}</Shell>
+        </AuthProvider>
       </body>
     </html>
   );

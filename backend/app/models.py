@@ -115,6 +115,17 @@ class Employee(SQLModel, table=True):
     department: Optional[str] = None
     position: Optional[str] = None
     hire_date: Optional[date] = None
+    role_id: Optional[int] = Field(default=None, foreign_key="role.id")
+
+
+# ---- 권한(역할) ----------------------------------------------------------
+
+class Role(SQLModel, table=True):
+    """권한 역할. permissions는 접근 가능한 모듈 키 목록(예: ['sales','hr'])."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)
+    description: Optional[str] = None
+    permissions: list[str] = Field(default_factory=list, sa_column=Column(JSONB))
 
 
 class Attendance(SQLModel, table=True):

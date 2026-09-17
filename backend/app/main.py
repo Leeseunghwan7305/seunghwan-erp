@@ -9,7 +9,7 @@ from sqlalchemy.exc import OperationalError
 from .chat.router import router as chat_router
 from .database import create_db_and_tables, engine
 from .rag.router import router as rag_router
-from .routers import accounts, dashboard, employees, expenses, items, orders, partners
+from .routers import accounts, dashboard, employees, expenses, items, orders, partners, roles
 from .seed import seed
 
 
@@ -50,6 +50,7 @@ app.include_router(items.router)
 app.include_router(partners.router)
 app.include_router(orders.router)
 app.include_router(employees.router)
+app.include_router(roles.router)
 app.include_router(accounts.router)
 app.include_router(expenses.router)
 app.include_router(chat_router)
