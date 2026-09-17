@@ -54,3 +54,35 @@ def search(query: str, top_k: int = 5) -> list[dict]:
             }
         )
     return results
+
+
+# 자동 주입 임계값: 진짜 문서 질문(규정·인물 등)은 0.6+로 강하게 매칭되는 반면,
+# 데이터 스냅샷이 재고·매출 질문에 약하게 걸리는 경우(0.53~0.56)를 배제하도록 0.6으로 둔다.
+# (그런 수치·현황 질문은 라이브 도구로 답해야 정확하다.)
+CONTEXT_MIN_SCORE = 0.6
+
+
+def context_for(query: str, top_k: int = 4, min_score: float = CONTEXT_MIN_SCORE) -> str:
+    """query로 문서를 미리 검색해 시스템 프롬프트에 붙일 '참고 문서' 블록을 만든다.
+
+    모델이 search_documents 호출을 스스로 판단하지 못해도 근거가 항상 컨텍스트에
+    들어가도록 하는 용도. 관련 청크가 없으면 빈 문자열을 반환한다.
+    """
+    if not (query or "").strip():
+        return ""
+    try:
+        hits = [h for h in search(query, top_k=top_k) if h["score"] >= min_score]
+    except Exception:  # noqa: BLE001 - 검색 실패가 대화를 막지 않도록
+        return ""
+    if not hits:
+        return ""
+    blocks = "\n\n".join(f"[출처: {h['title']}]\n{h['content']}" for h in hits)
+    return (
+        "\n\n# 참고 문서(사내 지식 자동 검색 결과)\n"
+        "아래는 사용자의 현재 질문으로 사내 문서를 미리 검색한 결과다. "
+        "질문과 관련된 내용이 있으면 반드시 이 내용을 근거로 답하라. "
+        "(별도로 search_documents 도구를 다시 부를 필요는 없다.)\n"
+        "이 문서 내용을 근거로 답한 경우, 답변 맨 끝에 줄을 바꿔 '(출처: 문서제목)' 형식으로 "
+        "실제로 사용한 문서 제목을 밝혀라.\n\n"
+        f"{blocks}\n"
+    )

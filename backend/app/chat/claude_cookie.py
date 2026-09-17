@@ -252,11 +252,15 @@ def run_claude_cookie(messages: list[dict]) -> Iterator[dict]:
         }
         return
 
-    # 첫 프롬프트: 프리앰블 + 도구 규약 + 지금까지의 대화 이력
+    # 첫 프롬프트: 프리앰블 + 자동 문서 검색 근거 + 도구 규약 + 지금까지의 대화 이력
+    from ..rag.retrieval import context_for
+
+    last_user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+    doc_ctx = context_for(last_user)
     history = "\n".join(
         f"{'사용자' if m['role'] == 'user' else 'AI'}: {m['content']}" for m in messages
     )
-    prompt = _PREAMBLE + tools_prompt() + "\n\n---\n" + history
+    prompt = _PREAMBLE + doc_ctx + tools_prompt() + "\n\n---\n" + history
 
     try:
         with httpx.Client(headers=_headers(cookies), timeout=120.0) as client:

@@ -15,13 +15,31 @@ import httpx
 
 from .tools import TOOL_DEFS, execute_tool
 
+
+def _last_user_text(messages: list[dict]) -> str:
+    """대화에서 가장 최근 사용자 발화를 찾는다(자동 문서 검색용)."""
+    return next(
+        (m["content"] for m in reversed(messages) if m.get("role") == "user"),
+        "",
+    )
+
+
+def _doc_context(messages: list[dict]) -> str:
+    """최근 사용자 질문으로 문서를 미리 검색해 시스템 프롬프트에 붙일 근거 블록."""
+    from ..rag.retrieval import context_for
+
+    return context_for(_last_user_text(messages))
+
 SYSTEM_PROMPT = (
-    "너는 제조 ERP의 업무 보조 AI다. 재고·주문·거래처·정산 관련 질문에 답한다.\n"
-    "- 수치·현황이 필요하면 반드시 제공된 도구(get_dashboard, get_inventory, list_orders, list_partners)로 "
-    "실제 데이터를 조회한 뒤 답하라.\n"
-    "- 매뉴얼·규정·계약·업무 지식 등 '문서'에 관한 질문은 반드시 먼저 search_documents 도구로 사내 지식 문서를 "
-    "검색하고, 검색 결과에 담긴 내용만 근거로 답하라. 검색 결과에 없는 내용은 절대 지어내지 말고 "
-    "'문서에서 찾을 수 없습니다'라고 답하라. 가능하면 근거 문서의 출처(제목)를 함께 밝혀라.\n"
+    "너는 제조 ERP의 업무 보조 AI다.\n"
+    "- 재고·주문·거래처·정산·매출 등 '현재 수치·현황'은 참고 문서에 비슷한 값이 있더라도 무시하고 "
+    "반드시 도구(get_dashboard, get_inventory, list_orders, list_partners)로 라이브 조회해 답하라. "
+    "도구가 최신이고 문서 스냅샷은 과거 값일 수 있다.\n"
+    "- 그 외 규정·용어·조직·인물·메모 등 지식 질문은 아래 '참고 문서'가 있으면 그 내용을 근거로 답하라. "
+    "참고 문서가 없거나 관련 내용이 없으면 search_documents 도구로 추가 검색하고, 그래도 없으면 "
+    "지어내지 말고 '문서에서 찾을 수 없습니다'라고 답하라. "
+    "문서를 근거로 답할 때는 답변 맨 끝에 줄을 바꿔 '(출처: 문서제목)'을 반드시 표기하라. "
+    "도구(라이브 데이터)로 답한 경우에는 출처를 붙이지 마라.\n"
     "- 추측 금지. 금액은 원(₩) 단위로 읽기 쉽게 표시하라. 한국어로 간결하게 답하라."
 )
 
@@ -60,6 +78,7 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
 
     client = Anthropic(api_key=api_key)
     model = model or os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
+    system = SYSTEM_PROMPT + _doc_context(messages)
     conv = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     for _ in range(MAX_TOOL_ROUNDS):
@@ -67,7 +86,7 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
             resp = client.messages.create(
                 model=model,
                 max_tokens=1024,
-                system=SYSTEM_PROMPT,
+                system=system,
                 tools=_claude_tools(),
                 messages=conv,
             )
@@ -102,7 +121,7 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
 def run_local(messages: list[dict], model: str | None = None) -> Iterator[dict]:
     base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     model = model or os.getenv("OLLAMA_MODEL", "qwen2.5")
-    conv: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    conv: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT + _doc_context(messages)}]
     conv += [{"role": m["role"], "content": m["content"]} for m in messages]
 
     for _ in range(MAX_TOOL_ROUNDS):
