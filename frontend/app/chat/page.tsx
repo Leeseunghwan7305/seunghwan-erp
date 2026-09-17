@@ -1,9 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PageHeader from "../components/PageHeader";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+// 대화·모델을 세션 동안 유지(탭 이동에도 보존, 탭 닫으면 초기화).
+const STORAGE_KEY = "erp_chat";
 
 type Role = "user" | "assistant";
 interface Msg {
@@ -33,6 +36,43 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const firstPersist = useRef(true); // 마운트 시 빈 상태로 저장본을 덮어쓰지 않도록
+
+  // 복원: 마운트 후 sessionStorage에서 대화·모델을 읽는다(SSR 하이드레이션 충돌 방지).
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (Array.isArray(saved.messages)) setMessages(saved.messages);
+      if (saved.model === "claude" || saved.model === "local") setModel(saved.model);
+    } catch {
+      /* 저장본 손상 시 무시하고 빈 대화로 시작 */
+    }
+  }, []);
+
+  // 저장: 대화·모델이 바뀔 때마다 반영. 첫 실행(마운트)은 건너뛴다.
+  useEffect(() => {
+    if (firstPersist.current) {
+      firstPersist.current = false;
+      return;
+    }
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ messages, model }));
+    } catch {
+      /* 용량 초과 등은 무시 */
+    }
+  }, [messages, model]);
+
+  const clearChat = () => {
+    if (busy) return;
+    setMessages([]);
+    try {
+      sessionStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const scrollDown = () =>
     requestAnimationFrame(() =>
@@ -106,20 +146,31 @@ export default function ChatPage() {
         title="AI 어시스턴트"
         desc="재고·주문·정산을 물어보면 실제 데이터를 조회해 답합니다. (조회 전용)"
         meta={
-          <div className="inline-flex overflow-hidden rounded-md border border-line text-sm">
-            {(["claude", "local"] as const).map((m) => (
+          <div className="flex items-center gap-2">
+            {messages.length > 0 && (
               <button
-                key={m}
-                onClick={() => setModel(m)}
-                className={`px-4 py-1.5 transition-colors ${
-                  model === m
-                    ? "bg-brand text-white"
-                    : "bg-surface text-ink-2 hover:text-ink"
-                }`}
+                onClick={clearChat}
+                disabled={busy}
+                className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm text-ink-2 transition-colors hover:border-brand hover:text-brand disabled:opacity-50"
               >
-                {m === "claude" ? "Claude" : "로컬 LLM"}
+                새 대화
               </button>
-            ))}
+            )}
+            <div className="inline-flex overflow-hidden rounded-md border border-line text-sm">
+              {(["claude", "local"] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setModel(m)}
+                  className={`px-4 py-1.5 transition-colors ${
+                    model === m
+                      ? "bg-brand text-white"
+                      : "bg-surface text-ink-2 hover:text-ink"
+                  }`}
+                >
+                  {m === "claude" ? "Claude" : "로컬 LLM"}
+                </button>
+              ))}
+            </div>
           </div>
         }
       />
