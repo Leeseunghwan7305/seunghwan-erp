@@ -56,10 +56,10 @@ def search(query: str, top_k: int = 5) -> list[dict]:
     return results
 
 
-# 자동 주입 임계값: 진짜 문서 질문(규정·인물 등)은 0.6+로 강하게 매칭되는 반면,
-# 데이터 스냅샷이 재고·매출 질문에 약하게 걸리는 경우(0.53~0.56)를 배제하도록 0.6으로 둔다.
-# (그런 수치·현황 질문은 라이브 도구로 답해야 정확하다.)
-CONTEXT_MIN_SCORE = 0.6
+# 자동 주입 임계값. 스냅샷에서 '도구로 답하는 라이브 수치'(재고 수량·주문 합계 등)는
+# 제외했으므로, 문서의 정적 데이터(직원·계정·거래처·비용 등)를 잘 찾도록 0.45로 둔다.
+# 재고·매출 같은 라이브 수치는 시스템 프롬프트가 도구로 라우팅한다(문서에 값이 없음).
+CONTEXT_MIN_SCORE = 0.45
 
 
 def context_for(query: str, top_k: int = 4, min_score: float = CONTEXT_MIN_SCORE) -> str:

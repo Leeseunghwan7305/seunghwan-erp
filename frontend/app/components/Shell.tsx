@@ -4,6 +4,7 @@ import { ReactNode, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "./AuthProvider";
 import Sidebar from "./Sidebar";
+import HelpDrawer from "./HelpDrawer";
 import { moduleForPath } from "../lib/permissions";
 
 function Center({ children }: { children: ReactNode }) {
@@ -51,6 +52,7 @@ export default function Shell({ children }: { children: ReactNode }) {
       <main className="min-w-0 flex-1 px-8 py-9 md:px-12">
         <div className="mx-auto max-w-6xl">{allowed ? children : <NoPermission />}</div>
       </main>
+      <HelpDrawer />
     </div>
   );
 }

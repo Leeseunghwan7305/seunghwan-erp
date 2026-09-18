@@ -203,6 +203,12 @@ export interface RagDocumentContent {
   content: string;
 }
 
+export interface RagManual {
+  title: string | null; // 출처 문서 제목(없으면 매칭 실패)
+  text: string; // 화면 섹션을 이어붙인 매뉴얼 본문
+  score: number;
+}
+
 async function uploadRagDocument(form: FormData): Promise<RagDocument> {
   // multipart 업로드 — request()의 JSON 헤더를 쓰지 않는다.
   const res = await fetch(`${BASE}/rag/documents`, { method: "POST", body: form });
@@ -263,7 +269,33 @@ export const api = {
     request<RagDocumentContent>(`/rag/documents/${id}/content`),
   ragSearch: (query: string, top_k = 5) =>
     post<{ results: RagSearchHit[] }>("/rag/search", { query, top_k }),
+  ragManual: (query: string) => post<RagManual>("/rag/manual", { query }),
+
+  agentPlan: (instruction: string, screen?: string) =>
+    post<AgentProposal>("/agent/plan", { instruction, screen }),
+  agentApply: (proposal: AgentProposal) =>
+    post<AgentApplyResult>("/agent/apply", { proposal }),
 };
+
+// ---- 실행(쓰기) 에이전트 --------------------------------------------------
+
+export interface AgentProposal {
+  ok: boolean;
+  action?: "create" | "update";
+  entity?: string;
+  entity_label?: string;
+  values?: Record<string, unknown>;
+  target?: { code?: string; id?: number } | null;
+  summary?: string;
+  warnings?: string[];
+  error?: string;
+}
+export interface AgentApplyResult {
+  ok: boolean;
+  message?: string;
+  id?: number;
+  error?: string;
+}
 
 // ₩(U+20A9)는 mono subset에 없어 폴백 글리프와 첫 숫자가 겹친다 → 얇은 공백으로 분리.
 export const won = (n: number) => `₩ ${n.toLocaleString("ko-KR")}`;

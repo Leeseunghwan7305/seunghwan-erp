@@ -24,11 +24,15 @@ def _last_user_text(messages: list[dict]) -> str:
     )
 
 
-def _doc_context(messages: list[dict]) -> str:
-    """최근 사용자 질문으로 문서를 미리 검색해 시스템 프롬프트에 붙일 근거 블록."""
+def _doc_context(messages: list[dict], min_score: float | None = None) -> str:
+    """최근 사용자 질문으로 문서를 미리 검색해 시스템 프롬프트에 붙일 근거 블록.
+
+    min_score를 주면 그 임계값으로 검색한다(도움말 도우미는 낮춰서 더 잘 찾게 함).
+    """
     from ..rag.retrieval import context_for
 
-    return context_for(_last_user_text(messages))
+    text = _last_user_text(messages)
+    return context_for(text) if min_score is None else context_for(text, min_score=min_score)
 
 
 # 엄격 근거 모드: 문서도 도구도 근거로 쓰지 않고 모델이 자기 지식으로만 답하는 것을 막는다.
@@ -82,7 +86,7 @@ def _ollama_tools() -> list[dict]:
 
 # ---- Claude --------------------------------------------------------------
 
-def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]:
+def run_claude(messages: list[dict], model: str | None = None, doc_min_score: float | None = None) -> Iterator[dict]:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         yield {"type": "error", "content": "ANTHROPIC_API_KEY가 설정되지 않았습니다. 프로젝트 루트 .env에 키를 넣고 백엔드를 재시작하세요."}
@@ -96,7 +100,7 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
 
     client = Anthropic(api_key=api_key)
     model = model or os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
-    doc_ctx = _doc_context(messages)
+    doc_ctx = _doc_context(messages, doc_min_score)
     has_doc = bool(doc_ctx)
     used_tool = False
     system = SYSTEM_PROMPT + CLAUDE_TERSE + doc_ctx
@@ -141,10 +145,10 @@ def run_claude(messages: list[dict], model: str | None = None) -> Iterator[dict]
 
 # ---- 로컬 (Ollama) --------------------------------------------------------
 
-def run_local(messages: list[dict], model: str | None = None) -> Iterator[dict]:
+def run_local(messages: list[dict], model: str | None = None, doc_min_score: float | None = None) -> Iterator[dict]:
     base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     model = model or os.getenv("OLLAMA_MODEL", "qwen2.5")
-    doc_ctx = _doc_context(messages)
+    doc_ctx = _doc_context(messages, doc_min_score)
     has_doc = bool(doc_ctx)
     used_tool = False
     conv: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT + doc_ctx}]
@@ -198,16 +202,19 @@ def run_local(messages: list[dict], model: str | None = None) -> Iterator[dict]:
     yield {"type": "error", "content": "도구 호출 한도를 초과했습니다."}
 
 
-def run_chat(model_choice: str, messages: list[dict]) -> Iterator[dict]:
+def run_chat(
+    model_choice: str, messages: list[dict], doc_min_score: float | None = None
+) -> Iterator[dict]:
     """model_choice: 'claude' | 'local'
 
     'claude'는 CLAUDE_SESSION_KEY(구독 쿠키)가 있으면 쿠키 provider를,
     없으면 공식 API provider(ANTHROPIC_API_KEY)를 사용한다.
+    doc_min_score: 문서 자동검색 임계값 override(도움말 도우미는 낮게 줘서 SOP를 더 잘 찾음).
     """
     if model_choice == "local":
-        yield from run_local(messages)
+        yield from run_local(messages, doc_min_score=doc_min_score)
     elif os.getenv("CLAUDE_SESSION_KEY", "").strip():
         from .claude_cookie import run_claude_cookie
         yield from run_claude_cookie(messages)
     else:
-        yield from run_claude(messages)
+        yield from run_claude(messages, doc_min_score=doc_min_score)

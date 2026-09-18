@@ -88,6 +88,14 @@ export default function CrudManager<T>({
   };
   useEffect(load, []);
 
+  // 실행 에이전트가 데이터를 바꾸면 목록 자동 새로고침
+  useEffect(() => {
+    const onChange = () => load();
+    window.addEventListener("erp:data-changed", onChange);
+    return () => window.removeEventListener("erp:data-changed", onChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 동적 옵션(select/checkboxes) 로드
   useEffect(() => {
     fields.forEach((f) => {

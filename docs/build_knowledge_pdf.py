@@ -6,6 +6,10 @@
 
 사용법: .venv/bin/python docs/build_knowledge_pdf.py
 """
+import datetime
+import json
+import os
+import urllib.request
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -141,6 +145,126 @@ def _decor(canvas, doc):
     canvas.restoreState()
 
 
+# ---- 데이터 스냅샷 (백엔드 REST API에서 현재 DB 값을 읽어옴) --------------
+API = os.getenv("ERP_API", "http://localhost:8000")
+_KIND = {"supplier": "공급처", "customer": "고객"}
+_OTYPE = {"purchase": "발주", "sale": "수주"}
+_OSTAT = {"draft": "작성", "confirmed": "확정", "done": "완료"}
+_MOD = {"dashboard": "대시보드", "ai": "AI", "sales": "영업관리",
+        "accounting": "회계관리", "hr": "인사관리", "admin": "권한관리"}
+
+
+def _fetch(ep):
+    try:
+        with urllib.request.urlopen(f"{API}/{ep}", timeout=10) as r:
+            return json.load(r)
+    except Exception as ex:  # noqa: BLE001
+        print(f"  (경고) {ep} 조회 실패: {ex}")
+        return None
+
+
+def _won(n):
+    try:
+        return f"₩{int(n):,}"
+    except (TypeError, ValueError):
+        return str(n)
+
+
+def snapshot_elements(W):
+    """DB의 현재 데이터를 표로 렌더. 백엔드가 꺼져 있으면 빈 리스트."""
+    out = []
+    today = datetime.date.today().isoformat()
+    out.append(P(f"5. 데이터 스냅샷 (기준일 {today})", "h2"))
+    out.append(P(
+        "아래는 기준일 시점의 ERP 내부 데이터 스냅샷이다. 품목 마스터·거래처·직원·역할·계정과목·"
+        "비용·주문 내역 등 정적 정보를 담는다. <b>재고 수량·주문 합계·매출/미수/미지급 등 실시간으로 "
+        "바뀌는 수치는 이 문서에 넣지 않으며</b>, 그 최신 값은 반드시 조회 도구(get_inventory·"
+        "get_dashboard·list_orders)로 확인한다.", "callout"))
+
+    items = _fetch("items")
+    if items:
+        # 재고 수량(quantity)은 라이브 수치라 제외 — 도구(get_inventory)로 조회한다.
+        out.append(P("5.1 품목 마스터 (단가·안전재고)", "h3"))
+        out.append(table(
+            ["코드", "품명", "단위", "매입가", "판매가", "안전재고"],
+            [[it["code"], it["name"], it["unit"], _won(it["purchase_price"]),
+              _won(it["sale_price"]), it["safety_stock"]] for it in items],
+            [W * 0.13, W * 0.34, W * 0.11, W * 0.18, W * 0.18, W * 0.10],
+            aligns={3: "RIGHT", 4: "RIGHT", 5: "RIGHT"},
+        ))
+        out.append(Spacer(1, 6))
+
+    partners = _fetch("partners")
+    if partners:
+        out.append(P("5.2 거래처", "h3"))
+        out.append(table(
+            ["이름", "구분", "연락처", "사업자번호"],
+            [[p["name"], _KIND.get(p["kind"], p["kind"]), p.get("phone") or "-", p.get("biz_no") or "-"]
+             for p in partners],
+            [W * 0.32, W * 0.14, W * 0.27, W * 0.27],
+        ))
+        out.append(Spacer(1, 6))
+
+    employees = _fetch("employees")
+    if employees:
+        out.append(P("5.3 직원", "h3"))
+        out.append(table(
+            ["이름", "부서", "직급", "입사일", "권한"],
+            [[em["name"], em.get("department") or "-", em.get("position") or "-",
+              em.get("hire_date") or "-", em.get("role_name") or "미지정"] for em in employees],
+            [W * 0.22, W * 0.20, W * 0.16, W * 0.22, W * 0.20],
+        ))
+        out.append(Spacer(1, 6))
+
+    roles = _fetch("roles")
+    if roles:
+        out.append(P("5.4 역할(권한)", "h3"))
+        out.append(table(
+            ["역할명", "설명", "접근 모듈"],
+            [[r["name"], r.get("description") or "-",
+              ", ".join(_MOD.get(k, k) for k in r.get("permissions", []))] for r in roles],
+            [W * 0.18, W * 0.32, W * 0.50],
+        ))
+        out.append(Spacer(1, 6))
+
+    accounts = _fetch("accounts")
+    if accounts:
+        out.append(P("5.5 계정과목", "h3"))
+        out.append(table(
+            ["코드", "계정명", "구분", "차대", "비고"],
+            [[a["code"], a["name"], a.get("category") or "-", a.get("entry_side") or "-",
+              a.get("memo") or "-"] for a in accounts],
+            [W * 0.12, W * 0.28, W * 0.16, W * 0.14, W * 0.30],
+        ))
+        out.append(Spacer(1, 6))
+
+    expenses = _fetch("expenses")
+    if expenses:
+        out.append(P("5.6 비용 지출 내역", "h3"))
+        out.append(table(
+            ["일자", "계정과목", "적요", "부서", "결제", "금액"],
+            [[x["expense_date"], x["account"], x.get("memo") or "-", x.get("dept") or "-",
+              x.get("method") or "-", _won(x["amount"])] for x in expenses],
+            [W * 0.16, W * 0.18, W * 0.24, W * 0.12, W * 0.14, W * 0.16],
+            aligns={5: "RIGHT"},
+        ))
+        out.append(Spacer(1, 6))
+
+    orders = _fetch("orders")
+    if orders:
+        # 합계(total)는 라이브 수치라 제외 — 매출·주문 금액은 도구(list_orders·get_dashboard)로 조회.
+        out.append(P("5.7 주문(발주·수주) 내역", "h3"))
+        out.append(table(
+            ["번호", "유형", "거래처", "일자", "상태"],
+            [[o["id"], _OTYPE.get(o["order_type"], o["order_type"]), o.get("partner_name") or "-",
+              o["order_date"], _OSTAT.get(o["status"], o["status"])] for o in orders],
+            [W * 0.12, W * 0.14, W * 0.36, W * 0.22, W * 0.16],
+        ))
+        out.append(Spacer(1, 6))
+
+    return out
+
+
 # ---- 문서 조립 ------------------------------------------------------------
 def build(out_path: Path):
     doc = SimpleDocTemplate(
@@ -182,14 +306,8 @@ def build(out_path: Path):
         [W * 0.22, W * 0.78],
     ))
     e.append(Spacer(1, 6))
-    e.append(P("1.3 직원 명단 (기준일 현재)", "h3"))
-    e.append(table(
-        ["성명", "부서", "직급", "입사일"],
-        [["김영업", "영업부", "대리", "2023-03-02"],
-         ["이재고", "물류부", "사원", "2024-01-15"],
-         ["박회계", "관리부", "과장", "2021-07-01"]],
-        [W * 0.25, W * 0.25, W * 0.2, W * 0.3],
-    ))
+    e.append(P("1.3 직원 명단", "h3"))
+    e.append(P("전체 직원 명단은 아래 '5.3 직원' 스냅샷을 참고한다. (권한·부서 포함)", "body"))
 
     # --- 2. SOP ---
     e.append(P("2. 업무 규정·프로세스 (SOP)", "h2"))
@@ -293,13 +411,73 @@ def build(out_path: Path):
         [W * 0.16, W * 0.34, W * 0.25, W * 0.25],
     ))
 
-    # --- 4. 실시간 데이터 안내(스냅샷은 넣지 않음) ---
-    e.append(P("4. 실시간 데이터", "h2"))
-    e.append(P(
-        "재고·주문·정산·경비 등 실시간으로 바뀌는 수치는 이 문서에 포함하지 않는다. "
-        "문서에 넣으면 곧 과거 값이 되어 챗봇이 잘못된 답을 하게 되기 때문이다. "
-        "최신 수치는 ERP 조회 도구(get_inventory·get_dashboard·list_orders·list_partners)로 확인한다.",
-        "body"))
+    # --- 4. 화면별 사용법 (UI 가이드) ---
+    e.append(P("4. 화면별 사용법 (UI 가이드)", "h2"))
+
+    e.append(P("4.1 로그인·권한·도움말", "h3"))
+    e.append(numbers([
+        "로그인 화면(/login)에서 본인 직원을 선택하고 '로그인'을 누른다. (프로토타입은 비밀번호 없이 직원 선택 방식)",
+        "좌측 메뉴에는 본인 역할(권한)에 허용된 모듈만 보인다. 권한 없는 화면에 URL로 접근하면 '접근 권한이 없습니다'가 표시된다.",
+        "화면 우하단의 '? 도움말' 버튼을 누르면 지금 화면의 사용법을 물어볼 수 있다.",
+        "좌측 하단 '로그아웃'으로 로그아웃한다.",
+    ]))
+
+    e.append(P("4.2 품목 등록·재고 수정 (영업관리 &gt; 품목관리)", "h3"))
+    e.append(numbers([
+        "좌측 메뉴에서 영업관리 &gt; 품목관리로 이동한다.",
+        "'+ 품목 등록'을 눌러 코드(중복 불가)·품명·단위·매입가·판매가·안전재고·재고 수량을 입력하고 '등록'한다.",
+        "단가나 재고 수량을 바꾸려면 해당 행의 '수정'을 누른다(코드는 수정 불가).",
+        "현재고가 안전재고보다 적으면 재고가 빨갛게 '미달'로 표시된다.",
+    ]))
+
+    e.append(P("4.3 거래처 등록 (영업관리 &gt; 거래처관리)", "h3"))
+    e.append(numbers([
+        "영업관리 &gt; 거래처관리 &gt; '+ 거래처 등록'.",
+        "거래처명·구분(공급처/고객)·연락처·사업자번호를 입력한다. 공급처는 발주, 고객은 수주 대상이다.",
+    ]))
+
+    e.append(P("4.4 수주 등록·확정 (영업관리 &gt; 수주현황)", "h3"))
+    e.append(numbers([
+        "영업관리 &gt; 수주현황 &gt; '+ 수주 등록'.",
+        "고객(거래처)을 고르고 '+ 품목 추가'로 품목·수량을 입력한 뒤 '등록'하면 draft(작성) 상태로 생성된다.",
+        "'확정'을 누르면 출고 수량만큼 재고가 자동 차감되고 매출 전표(미수)가 생성된다. 재고가 부족하면 확정이 막힌다.",
+        "draft 상태만 삭제할 수 있고, 확정된 수주는 삭제할 수 없다.",
+    ]))
+
+    e.append(P("4.5 직원 등록·권한 지정 (인사관리 &gt; 직원관리)", "h3"))
+    e.append(numbers([
+        "인사관리 &gt; 직원관리 &gt; '+ 직원 등록'. 이름·부서·직급·입사일을 입력한다.",
+        "직원에게 권한을 주려면 '권한(역할)'에서 역할을 선택한다. 역할은 권한관리에서 미리 만들어 둔다.",
+        "이미 등록된 직원의 권한을 바꾸려면 '수정'에서 역할을 다시 고른다.",
+    ]))
+
+    e.append(P("4.6 역할(권한) 만들기 (인사관리 &gt; 권한관리)", "h3"))
+    e.append(numbers([
+        "인사관리 &gt; 권한관리 &gt; '+ 역할 등록'.",
+        "역할명·설명을 입력하고, 그 역할이 접근할 모듈(대시보드·AI·영업관리·회계관리·인사관리·권한관리)을 체크한다.",
+        "기본 역할은 관리자(전체)·매니저(영업·회계·인사)·일반사원(영업·AI)이며, 직원관리에서 직원에게 지정한다.",
+    ]))
+
+    e.append(P("4.7 비용 등록 (회계관리 &gt; 비용관리)", "h3"))
+    e.append(numbers([
+        "회계관리 &gt; 비용관리 &gt; '+ 비용 등록'.",
+        "일자·계정과목·적요·부서·결제수단(법인카드/현금/계좌이체)·금액을 입력한다. 경비는 주문과 무관한 지출이다.",
+    ]))
+
+    e.append(P("4.8 계정과목 추가 (회계관리 &gt; 계정과목관리)", "h3"))
+    e.append(numbers([
+        "회계관리 &gt; 계정과목관리 &gt; '+ 계정과목 등록'.",
+        "코드(중복 불가)·계정과목명·구분(자산/부채/자본/수익/비용)·차대(차변/대변)·비고를 입력한다.",
+    ]))
+
+    e.append(P("4.9 지식 문서 업로드 (AI &gt; 지식 문서)", "h3"))
+    e.append(numbers([
+        "AI &gt; 지식 문서에서 파일(txt/md/pdf) 업로드 또는 텍스트 붙여넣기로 문서를 추가한다.",
+        "상태가 indexing → ready가 되면 AI 어시스턴트와 도움말이 그 내용을 검색해 답한다.",
+    ]))
+
+    # --- 5. 데이터 스냅샷 (DB에서 현재 값을 읽어 렌더) ---
+    e.extend(snapshot_elements(W))
 
     e.append(Spacer(1, 14))
     e.append(HRFlowable(width="100%", thickness=0.6, color=LINE, spaceAfter=6))

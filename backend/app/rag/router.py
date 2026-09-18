@@ -33,6 +33,10 @@ class SearchRequest(SQLModel):
     top_k: int = 5
 
 
+class ManualRequest(SQLModel):
+    query: str
+
+
 def _to_read(doc: Document) -> DocumentRead:
     return DocumentRead(
         id=doc.id,
@@ -183,3 +187,37 @@ def delete_document(document_id: int):
 def search_documents(req: SearchRequest):
     """유사 청크 top_k 조회(관리 페이지 검색 테스트 · 내부 재사용)."""
     return {"results": search(req.query, req.top_k)}
+
+
+# 매뉴얼 전문 조립 시 최적 청크 기준 앞뒤로 이어붙일 청크 수(연속 섹션 재구성용).
+# 매칭 청크에 대개 섹션 머리말이 있어 그 지점부터 이어 붙이는 게 가장 자연스럽다.
+_MANUAL_BEFORE = 0
+_MANUAL_AFTER = 2
+
+
+@router.post("/manual")
+def manual(req: ManualRequest):
+    """화면별 매뉴얼 전문: 질의에 가장 잘 맞는 섹션을 인접 청크까지 이어 재구성해 반환.
+
+    단일 스니펫이 아니라 최적 청크 앞뒤 청크를 ordinal 순서로 이어 붙여(오버랩 제거)
+    '읽기용 매뉴얼 본문'으로 돌려준다. HelpDrawer의 매뉴얼 탭에서 사용.
+    """
+    hits = search(req.query, top_k=6)
+    if not hits:
+        return {"title": None, "text": "", "score": 0.0}
+    best = hits[0]
+    center = best["ordinal"]
+    lo, hi = max(0, center - _MANUAL_BEFORE), center + _MANUAL_AFTER
+    with Session(engine) as session:
+        chunks = session.exec(
+            select(DocChunk)
+            .where(DocChunk.document_id == best["document_id"])
+            .where(DocChunk.ordinal >= lo)
+            .where(DocChunk.ordinal <= hi)
+            .order_by(DocChunk.ordinal)
+        ).all()
+    return {
+        "title": best["title"],
+        "text": _join_chunks([c.content for c in chunks]),
+        "score": best["score"],
+    }

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import OperationalError
 
+from .agent.router import router as agent_router
 from .chat.router import router as chat_router
 from .database import create_db_and_tables, engine
 from .rag.router import router as rag_router
@@ -55,6 +56,7 @@ app.include_router(accounts.router)
 app.include_router(expenses.router)
 app.include_router(chat_router)
 app.include_router(rag_router)
+app.include_router(agent_router)
 
 
 @app.get("/health", tags=["meta"])

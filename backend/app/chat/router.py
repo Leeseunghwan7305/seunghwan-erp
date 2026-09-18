@@ -1,5 +1,5 @@
 import json
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -18,6 +18,8 @@ class ChatMessage(SQLModel):
 class ChatRequest(SQLModel):
     model: Literal["claude", "local"] = "claude"
     messages: list[ChatMessage]
+    # 문서 자동검색 임계값 override. 도움말 도우미가 0.35 정도로 낮춰 SOP를 더 잘 찾게 함.
+    doc_min_score: Optional[float] = None
 
 
 @router.post("")
@@ -26,7 +28,7 @@ def chat(req: ChatRequest):
 
     def event_stream():
         msgs = [{"role": m.role, "content": m.content} for m in req.messages]
-        for event in run_chat(req.model, msgs):
+        for event in run_chat(req.model, msgs, doc_min_score=req.doc_min_score):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
