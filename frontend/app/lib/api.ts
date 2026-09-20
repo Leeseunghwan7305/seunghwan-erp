@@ -269,7 +269,8 @@ export const api = {
     request<RagDocumentContent>(`/rag/documents/${id}/content`),
   ragSearch: (query: string, top_k = 5) =>
     post<{ results: RagSearchHit[] }>("/rag/search", { query, top_k }),
-  ragManual: (query: string) => post<RagManual>("/rag/manual", { query }),
+  ragManual: (query: string, section?: string) =>
+    post<RagManual>("/rag/manual", { query, section }),
 
   agentPlan: (instruction: string, screen?: string) =>
     post<AgentProposal>("/agent/plan", { instruction, screen }),

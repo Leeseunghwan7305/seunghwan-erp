@@ -1,9 +1,14 @@
 // 화면별 도움말 정의 — 도우미 드로어가 현재 경로로 제목·추천질문을 고른다.
 // 답변은 RAG(지식문서)로 생성되므로 여기엔 "무엇을 물을지"만 정의한다.
 
-// manual: 매뉴얼 탭이 RAG에서 이 화면 섹션을 집도록 하는 조회어.
-// 화면 UI 사용법(4.x 섹션)에 맞도록 "화면/사용법/방법" 뉘앙스로 적는다. 없으면 title 사용.
-export type ScreenHelp = { title: string; questions: string[]; manual?: string };
+// manual: 매뉴얼 탭이 RAG에서 이 화면 문서를 찾도록 하는 조회어(없으면 title 사용).
+// manualSection: 지식 문서의 섹션 번호(예: "4.2"). 주면 그 섹션만 정확히 잘라 보여준다.
+export type ScreenHelp = {
+  title: string;
+  questions: string[];
+  manual?: string;
+  manualSection?: string;
+};
 
 // 경로 프리픽스 → 도움말. 더 구체적인 경로를 위에 둔다(위에서부터 첫 매치).
 const TABLE: { prefix: string; help: ScreenHelp }[] = [
@@ -19,6 +24,7 @@ const TABLE: { prefix: string; help: ScreenHelp }[] = [
     help: {
       title: "수주현황",
       manual: "수주현황 화면에서 수주 등록하고 확정하는 방법 UI 사용법 재고 반영",
+      manualSection: "4.4",
       questions: [
         "수주는 어떻게 등록하나요?",
         "수주를 확정하면 어떻게 되나요?",
@@ -31,6 +37,7 @@ const TABLE: { prefix: string; help: ScreenHelp }[] = [
     help: {
       title: "거래처관리",
       manual: "거래처관리 화면에서 거래처 등록하는 방법 UI 사용법 공급처 고객 구분",
+      manualSection: "4.3",
       questions: ["거래처는 어떻게 등록하나요?", "공급처와 고객의 차이가 뭔가요?"],
     },
   },
@@ -39,6 +46,7 @@ const TABLE: { prefix: string; help: ScreenHelp }[] = [
     help: {
       title: "품목관리",
       manual: "품목관리 화면에서 품목 등록하고 재고 수량 바꾸는 방법 UI 사용법 안전재고",
+      manualSection: "4.2",
       questions: [
         "품목은 어떻게 등록하나요?",
         "안전재고가 뭔가요?",
@@ -51,6 +59,7 @@ const TABLE: { prefix: string; help: ScreenHelp }[] = [
     help: {
       title: "비용관리",
       manual: "비용관리 화면에서 비용 등록하는 방법 UI 사용법 결제수단 계정과목",
+      manualSection: "4.7",
       questions: ["비용은 어떻게 등록하나요?", "결제수단은 무엇을 고르나요?"],
     },
   },
@@ -59,6 +68,7 @@ const TABLE: { prefix: string; help: ScreenHelp }[] = [
     help: {
       title: "계정과목관리",
       manual: "계정과목관리 화면에서 계정과목 추가하는 방법 UI 사용법 차변 대변 구분",
+      manualSection: "4.8",
       questions: [
         "계정과목은 어떻게 추가하나요?",
         "차변과 대변이 뭔가요?",
@@ -71,6 +81,7 @@ const TABLE: { prefix: string; help: ScreenHelp }[] = [
     help: {
       title: "권한관리",
       manual: "권한관리 화면에서 역할 만들기 방법 UI 사용법 모듈 접근 권한",
+      manualSection: "4.6",
       questions: ["역할은 어떻게 만드나요?", "모듈 권한이 무슨 뜻인가요?"],
     },
   },
@@ -79,6 +90,7 @@ const TABLE: { prefix: string; help: ScreenHelp }[] = [
     help: {
       title: "직원관리",
       manual: "직원관리 화면에서 직원 등록하고 권한 역할 지정하는 방법 UI 사용법",
+      manualSection: "4.5",
       questions: ["직원은 어떻게 등록하나요?", "직원에게 권한(역할)은 어떻게 지정하나요?"],
     },
   },
@@ -87,6 +99,7 @@ const TABLE: { prefix: string; help: ScreenHelp }[] = [
     help: {
       title: "지식 문서",
       manual: "지식 문서 화면에서 문서 업로드하는 방법 UI 사용법 AI 검색 인덱싱",
+      manualSection: "4.9",
       questions: ["지식 문서는 어떻게 올리나요?", "AI가 문서를 어떻게 찾나요?"],
     },
   },

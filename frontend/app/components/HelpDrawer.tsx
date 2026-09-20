@@ -126,7 +126,7 @@ export default function HelpDrawer() {
     const seq = ++manualSeq.current;
     setManualBusy(true); setManualText(""); setManualTitle(null);
     try {
-      const r = await api.ragManual(help.manual ?? help.title);
+      const r = await api.ragManual(help.manual ?? help.title, help.manualSection);
       if (seq !== manualSeq.current) return; // 화면이 바뀌었으면 버림
       setManualText(r.text || ""); setManualTitle(r.title); setManualScreen(help.title);
     } catch (e) {

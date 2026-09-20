@@ -1,4 +1,5 @@
 """RAG 지식 문서 API: 업로드(비동기 인제스트)·목록·삭제·검색."""
+import re
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
@@ -35,6 +36,7 @@ class SearchRequest(SQLModel):
 
 class ManualRequest(SQLModel):
     query: str
+    section: Optional[str] = None  # 예: "4.4" — 주면 그 섹션만 정확히 잘라 반환
 
 
 def _to_read(doc: Document) -> DocumentRead:
@@ -189,35 +191,67 @@ def search_documents(req: SearchRequest):
     return {"results": search(req.query, req.top_k)}
 
 
-# 매뉴얼 전문 조립 시 최적 청크 기준 앞뒤로 이어붙일 청크 수(연속 섹션 재구성용).
-# 매칭 청크에 대개 섹션 머리말이 있어 그 지점부터 이어 붙이는 게 가장 자연스럽다.
+# section 미지정 시(자유 조회) 최적 청크 앞뒤로 이어붙일 청크 수.
 _MANUAL_BEFORE = 0
 _MANUAL_AFTER = 2
 
 
+def _clean_manual(text: str) -> str:
+    """PDF 추출 잔재(페이지 번호·반복 머리말)를 걷어내 읽기 좋게 정리한다."""
+    text = re.sub(r"\n?- \d+ -\n?", "\n", text)
+    text = re.sub(r"\n?seunghwan-erp · 사내 운영 지식 문서\n?", "\n", text)
+    text = re.sub(r"\n?RAG 내부 문서 · 기준일 [0-9-]+\n?", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _slice_section(full: str, section: str) -> Optional[str]:
+    """전체 문서 텍스트에서 'N.N' 섹션 머리말부터 다음 'N.N' 머리말 직전까지 잘라낸다."""
+    m = re.search(rf"{re.escape(section)} [가-힣]", full)
+    if not m:
+        return None
+    start = m.start()
+    nxt = re.search(r"\n?\d\.\d+ [가-힣]", full[start + 3:])
+    end = start + 3 + nxt.start() if nxt else len(full)
+    return full[start:end].strip()
+
+
 @router.post("/manual")
 def manual(req: ManualRequest):
-    """화면별 매뉴얼 전문: 질의에 가장 잘 맞는 섹션을 인접 청크까지 이어 재구성해 반환.
+    """화면별 매뉴얼 전문.
 
-    단일 스니펫이 아니라 최적 청크 앞뒤 청크를 ordinal 순서로 이어 붙여(오버랩 제거)
-    '읽기용 매뉴얼 본문'으로 돌려준다. HelpDrawer의 매뉴얼 탭에서 사용.
+    section이 주어지면: 임베딩으로 문서를 특정한 뒤 그 문서 전체를 이어 붙여
+    해당 섹션(N.N)만 정확히 잘라 반환한다(임베딩 착지 정밀도에 의존하지 않음).
+    section이 없으면: 자유 조회로 최적 청크 주변을 이어 붙여 반환한다.
+    HelpDrawer의 매뉴얼 탭에서 사용.
     """
     hits = search(req.query, top_k=6)
     if not hits:
         return {"title": None, "text": "", "score": 0.0}
     best = hits[0]
-    center = best["ordinal"]
-    lo, hi = max(0, center - _MANUAL_BEFORE), center + _MANUAL_AFTER
+
     with Session(engine) as session:
+        if req.section:
+            # 문서 전체를 순서대로 이어 붙여 섹션을 정확히 슬라이스.
+            all_chunks = session.exec(
+                select(DocChunk)
+                .where(DocChunk.document_id == best["document_id"])
+                .order_by(DocChunk.ordinal)
+            ).all()
+            sliced = _slice_section(_join_chunks([c.content for c in all_chunks]), req.section)
+            if sliced:
+                return {"title": best["title"], "text": _clean_manual(sliced), "score": best["score"]}
+
+        # 폴백: 최적 청크 주변 창.
+        center = best["ordinal"]
         chunks = session.exec(
             select(DocChunk)
             .where(DocChunk.document_id == best["document_id"])
-            .where(DocChunk.ordinal >= lo)
-            .where(DocChunk.ordinal <= hi)
+            .where(DocChunk.ordinal >= max(0, center - _MANUAL_BEFORE))
+            .where(DocChunk.ordinal <= center + _MANUAL_AFTER)
             .order_by(DocChunk.ordinal)
         ).all()
     return {
         "title": best["title"],
-        "text": _join_chunks([c.content for c in chunks]),
+        "text": _clean_manual(_join_chunks([c.content for c in chunks])),
         "score": best["score"],
     }
