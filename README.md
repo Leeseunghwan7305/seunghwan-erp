@@ -11,7 +11,7 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 - **회계** — 매입/매출 전표, 미수금·미지급금, 계정·경비
 - **인사** — 직원·근태
 - **대시보드** — 매출·매입·재고·정산 요약 지표
-- **AI 에이전트 ‘원장(元帳)’** — 정체성 + 5단계 리즈닝(의도 분류 → 근거 계획 → 도구 실행 → 자기 점검 → 답변)을 갖춘 RAG 에이전트. **실시간 수치는 도구 / 사내 규정은 문서 / 외부 정보는 웹**으로 스스로 근거 경로를 판단 (Claude API · 구독 세션 · 로컬 Ollama 3-provider)
+- **AI 에이전트 ‘원장(元帳)’** — 정체성 + 5단계 리즈닝(의도 분류 → 근거 계획 → 도구 실행 → 자기 점검 → 답변)을 갖춘 RAG 에이전트. **실시간 수치는 도구 / 사내 규정은 문서 / 외부 정보는 웹**으로 스스로 근거 경로를 판단 (Claude API · 로컬 Ollama 모델 라우팅)
 - **RAG 지식 문서 관리** — 문서(PDF·MD·텍스트) 업로드 → 임베딩(`bge-m3`) 색인 → 검색. 챗봇이 사내 규정·매뉴얼을 **근거(출처)와 함께** 답변. 관리 페이지에서 업로드·색인 상태·검색 품질 테스트·삭제까지 제공
 - **근거 라우팅 & 할루시네이션 제어** — 검색·도구 결과를 근거로 자동 주입하고, 근거가 없으면 코드 레벨에서 답변 차단(`RAG_STRICT`). 임베딩 유사도 분포를 측정해 자동주입 임계값을 **0.50**(잡음/신호 사이)으로 캘리브레이션
 - **출처 배지(Provenance)** — 답변마다 근거 출처(🌐 웹 검색 / 📄 사내 문서 / 📊 ERP 데이터 / 🧠 근거 없음)를 표시해 오해를 제거
@@ -100,26 +100,24 @@ DB 데이터를 완전히 초기화하려면 `docker compose down -v`로 볼륨�
 | `NEXT_PUBLIC_API_URL` | 브라우저에서 호출할 API 주소(호스트 기준) | `http://localhost:8000` |
 | `ANTHROPIC_API_KEY` | Claude API 키 (사용량 과금) | *(비어 있음)* |
 | `CLAUDE_MODEL` | Claude 모델명 | `claude-sonnet-5` |
-| `CLAUDE_SESSION_KEY` | claude.ai 구독 세션 쿠키(있으면 API보다 우선). ToS 회색지대·불안정, 개발용 | *(비어 있음)* |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | 로컬 LLM 서버·모델 태그 | `http://localhost:11434` / `qwen2.5:7b` |
 | `OLLAMA_EMBED_MODEL` | RAG 임베딩 모델(dim 1024) | `bge-m3` |
 | `RAG_STRICT` | 근거(문서·도구) 없으면 답변 차단 여부 | `true` |
 | `SLACK_WEBHOOK_URL` | 알림 웹훅 URL(Slack/Discord 자동 판별). 확인 후 전송에만 사용 | *(비어 있음)* |
 
-> `.env`에는 실제 시크릿(`CLAUDE_SESSION_KEY`·`SLACK_WEBHOOK_URL` 등)이 들어가므로 절대 커밋하지 마세요. `.gitignore`로 제외돼 있습니다.
+> `.env`에는 실제 시크릿(`ANTHROPIC_API_KEY`·`SLACK_WEBHOOK_URL` 등)이 들어가므로 절대 커밋하지 마세요. `.gitignore`로 제외돼 있습니다.
 
 ## AI 챗봇 설정
 
-챗봇은 `POST /chat`의 `model` 값에 따라 라우팅되며, `claude` 선택 시 구독 세션 쿠키가 있으면 그 경로를, 없으면 공식 API로 폴백합니다.
+챗봇은 `POST /chat`의 `model` 값에 따라 두 경로로 라우팅됩니다.
 
 | 경로 | 조건 | 비고 |
 |------|------|------|
-| **① 구독 세션(쿠키)** | `model: "claude"` + `CLAUDE_SESSION_KEY` 존재 | claude.ai 웹 세션 재사용(개발 중 추가 과금 회피). 도구는 프롬프트 에뮬레이션 ReAct |
-| **② Claude API** | `model: "claude"` + 쿠키 없음 | `ANTHROPIC_API_KEY`로 정식 tool-use (사용량 과금) |
-| **③ 로컬** | `model: "local"` | Ollama(`qwen2.5:7b`) — httpx로 `/api/chat` 호출 |
+| **① Claude API** | `model: "claude"` | `ANTHROPIC_API_KEY`로 정식 tool-use (사용량 과금) |
+| **② 로컬** | `model: "local"` | Ollama(`qwen2.5:7b`) — httpx로 `/api/chat` 호출 |
 
 - **로컬 실행:** 호스트에서 `ollama serve` + `ollama pull qwen2.5:7b` + `ollama pull bge-m3`(임베딩). 컨테이너에서 호스트 Ollama를 쓰려면 `OLLAMA_BASE_URL=http://host.docker.internal:11434`로 지정.
-- **에이전트 정체성·리즈닝:** 세 경로 모두 `AGENT_IDENTITY` / `REASONING_FRAMEWORK` / `AGENT_RULES` 공유 상수를 사용해 동일한 ‘원장’ 에이전트로 동작합니다.
+- **에이전트 정체성·리즈닝:** 두 경로 모두 `AGENT_IDENTITY` / `REASONING_FRAMEWORK` / `AGENT_RULES` 공유 상수를 사용해 동일한 ‘원장’ 에이전트로 동작합니다.
 - **도구:** ERP 조회(`get_dashboard`, `get_inventory`, `list_orders`, `list_partners`) · 문서 검색(`search_documents`) · 웹 검색(`web_search`). 하나의 도구 정의를 Claude·Ollama 규격으로 변환해 재사용하고, 모든 호출은 감사 로그에 기록됩니다. 응답은 SSE 스트리밍이며 최대 6회까지 도구 호출을 반복합니다.
 - **쓰기(실행) 경로:** 데이터 변경은 챗봇이 직접 실행하지 않고 `/agent/plan` → 사용자 확인 → `/agent/apply`(human-in-the-loop)로 분리됩니다.
 
@@ -167,7 +165,7 @@ seunghwan-erp/
 │       ├── seed.py             # 샘플 데이터
 │       ├── audit.py            # 감사 로그 기록/조회
 │       ├── routers/            # dashboard · items · partners · orders · employees · roles · accounts · expenses
-│       ├── chat/               # AI 에이전트: router(SSE) · providers(라우팅·리즈닝 프롬프트) · claude_cookie(쿠키 ReAct) · tools
+│       ├── chat/               # AI 에이전트: router(SSE) · providers(라우팅·리즈닝 프롬프트) · tools
 │       ├── rag/                # RAG: retrieval · embeddings · chunk · extract · router(업로드·검색)
 │       ├── agent/              # 실행 에이전트: router(plan/apply)
 │       └── integrations/       # 외부 연동: slack(웹훅) · router(전송·감사 조회)
