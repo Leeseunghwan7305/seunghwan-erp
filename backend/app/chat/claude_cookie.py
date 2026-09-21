@@ -48,14 +48,16 @@ def _retry_after_seconds(resp: httpx.Response, attempt: int) -> float:
             pass
     return min(_BACKOFF_BASE * (2 ** attempt), _BACKOFF_CAP)
 
+# 쿠키 경로도 공식 API 경로와 '같은 에이전트'로 동작하도록 정체성·리즈닝·규칙을 공유한다.
+# (쿠키 경로는 답변 군더더기 방지 문구를 한 줄 덧붙인다.)
+from .providers import AGENT_IDENTITY, AGENT_RULES, REASONING_FRAMEWORK
+
 _PREAMBLE = (
-    "너는 제조 ERP의 업무 보조 AI다.\n"
-    "- 아래 '참고 문서'에 질문의 답이 있으면 반드시 그 문서 내용을 근거로 답하고(숫자도 문서 값 그대로) "
-    "답변 맨 끝에 '(출처: 문서제목)'을 표기하라.\n"
-    "- 재고·주문·매출/미수금/미지급금 등 실시간 ERP 운영 현황은 문서가 아니라 아래 도구로 조회해 답하라(출처 없음).\n"
-    "- 문서에도 없고 도구로도 얻을 수 없으면 지어내지 말고 '문서에서 찾을 수 없습니다'라고만 답하라.\n"
-    "- 답변은 '질문에 대한 답'과 '(출처: 제목)'만 출력하라. 인사·되묻기·부연 설명·주의 문구·"
-    "군더더기는 절대 붙이지 마라. 금액은 원(₩) 단위, 한국어로 간결히.\n\n"
+    AGENT_IDENTITY
+    + REASONING_FRAMEWORK
+    + AGENT_RULES
+    + "\n- 답변은 '질문에 대한 답'과 '(출처: 제목)'만 출력하라. 인사·되묻기·부연 설명·"
+    "주의 문구·사고 과정 등 군더더기는 절대 붙이지 마라.\n\n"
 )
 
 

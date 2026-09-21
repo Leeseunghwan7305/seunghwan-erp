@@ -47,17 +47,63 @@ def _guard_answer(text: str, has_doc: bool, used_tool: bool) -> str:
         return NO_GROUND_MSG
     return text
 
-SYSTEM_PROMPT = (
-    "너는 제조 ERP의 업무 보조 AI다.\n"
-    "- 아래 '참고 문서'에 질문의 답이 있으면 반드시 그 문서 내용을 근거로 답하라. 문서에 적힌 "
-    "숫자(나이·가격 등)도 그대로 문서 값을 쓰고, 답변 맨 끝에 줄을 바꿔 '(출처: 문서제목)'을 표기하라.\n"
-    "- 재고 수량·주문 내역·매출/미수금/미지급금 등 실시간 ERP 운영 현황은 문서가 아니라 반드시 "
-    "도구(get_dashboard, get_inventory, list_orders, list_partners)로 라이브 조회해 답하라. "
-    "이때는 출처를 붙이지 마라.\n"
-    "- 문서에 적힌 내용만 사용하고, 문서에 없는 배경지식·정의·수치를 지어내 덧붙이지 마라. "
-    "문서에도 없고 도구로도 얻을 수 없는 것은 지어내지 말고 '문서에서 찾을 수 없습니다'라고만 답하라.\n"
+
+def _web_fallback_context(query: str) -> str:
+    """모델이 근거 없이 거부하려 할 때, 백엔드가 직접 web_search를 돌려 만든 근거 블록.
+
+    작은 로컬 모델은 web_search 도구를 스스로 잘 못 부른다. 그래서 '근거 없음'으로
+    거부하기 직전에 서버가 검색을 대신 실행하고, 그 결과를 문서 근거처럼 주입해
+    한 번 더 답하게 한다. 결과가 없으면 ''을 돌려 기존 거부로 폴백한다.
+    """
+    q = (query or "").strip()
+    if not q:
+        return ""
+    res = execute_tool("web_search", {"query": q})
+    if not isinstance(res, list) or not res:
+        return ""
+    lines = ["\n\n# 웹 검색 결과 (이 내용에만 근거해 답하고, 답 끝에 '(출처: 웹 검색)'을 붙여라)"]
+    for h in res[:5]:
+        lines.append(f"- {h.get('제목', '')}: {h.get('요약', '')}")
+    return "\n".join(lines)
+
+# ── RAG 에이전트 정체성 / 리즈닝 / 규칙 ───────────────────────────────────
+# 세 조각으로 나눠 쿠키 provider(_PREAMBLE)와 공유한다. '수동적 RAG'가 아니라
+# 스스로 의도를 분류하고 도구를 골라 근거를 모은 뒤 자기점검하는 '에이전트'로 동작시킨다.
+
+AGENT_IDENTITY = (
+    "너는 '원장(元帳)'이라는 이름의 제조·유통 ERP 운영 에이전트다. "
+    "프로젝트의 '물류 원장'을 지키는 실무 담당자처럼, 사용자의 업무 질문을 스스로 분석해 "
+    "어떤 근거가 필요한지 판단하고, 알맞은 도구를 골라 근거를 확보한 뒤, 그 근거만으로 "
+    "정확하게 답하는 것이 너의 임무다. 정중하지만 군더더기 없이, 사실에 충실하라.\n"
+)
+
+# 리즈닝 절차: '답을 바로 쓰지 말고, 먼저 판단하라'는 에이전트의 핵심.
+REASONING_FRAMEWORK = (
+    "\n# 사고 절차 (매 질문마다 속으로 따르되, 과정은 출력하지 마라)\n"
+    "1) 의도 분류 — 질문이 무엇을 원하나? "
+    "(a) 실시간 ERP 수치  (b) 사내 규정·정의·절차  (c) 외부 최신 정보  (d) 단순 대화\n"
+    "2) 근거 계획 — 그 답을 뒷받침할 근거를 '어떤 도구로' 얻을지 정하라.\n"
+    "   · (a) → get_dashboard/get_inventory/list_orders/list_partners (라이브 조회, 출처 없음)\n"
+    "   · (b) → 아래 '참고 문서'(자동 주입) 또는 search_documents (답 끝에 '(출처: 제목)')\n"
+    "   · (c) → web_search (답 끝에 '(출처: 웹 검색)')\n"
+    "3) 실행 — 계획한 도구를 호출해 근거를 확보하라. 필요하면 여러 개를 이어서 써도 된다.\n"
+    "4) 자기 점검 — 확보한 근거가 답하기에 충분한가? 부족하거나 어긋나면 도구를 한 번 더 불러 보완하라.\n"
+    "5) 답변 — 확보한 근거만으로 답하라. 근거가 없으면 지어내지 말고 '문서에서 찾을 수 없습니다'.\n"
+)
+
+AGENT_RULES = (
+    "\n# 규칙\n"
+    "- 재고 수량·주문 내역·매출/미수금/미지급금 등 실시간 현황은 문서가 아니라 반드시 도구로 "
+    "라이브 조회하라(이때는 출처를 붙이지 마라).\n"
+    "- 사내 규정·정의·절차는 참고 문서/문서 도구를 근거로 하고, 문서의 값(숫자 포함)은 그대로 "
+    "쓰며 답 끝에 줄을 바꿔 '(출처: 문서제목)'을 표기하라.\n"
+    "- 사내 문서·ERP 데이터로 답할 수 없는 외부 정보(시세·환율·시사·일반 용어 정의 등)는 지어내지 "
+    "말고 반드시 web_search로 검색해 근거에 두고, 답 끝에 '(출처: 웹 검색)'을 표기하라.\n"
+    "- 문서에도 없고, ERP 도구로도, web_search로도 얻을 수 없을 때만 '문서에서 찾을 수 없습니다'라고 답하라.\n"
     "- 추측 금지. 금액은 원(₩) 단위로 읽기 쉽게 표시하라. 한국어로 간결하게 답하라."
 )
+
+SYSTEM_PROMPT = AGENT_IDENTITY + REASONING_FRAMEWORK + AGENT_RULES
 
 MAX_TOOL_ROUNDS = 6
 
@@ -125,6 +171,24 @@ def run_claude(messages: list[dict], model: str | None = None, doc_min_score: fl
         tool_uses = [b for b in resp.content if b.type == "tool_use"]
         if not tool_uses:
             text = "".join(b.text for b in resp.content if b.type == "text")
+            if STRICT_GROUNDING and not has_doc and not used_tool:
+                q = _last_user_text(messages)
+                web = _web_fallback_context(q)
+                if web:
+                    yield {"type": "tool", "name": "web_search", "input": {"query": q}}
+                    try:
+                        resp2 = client.messages.create(
+                            model=model, max_tokens=1024, temperature=0,
+                            system=SYSTEM_PROMPT + CLAUDE_TERSE + web,
+                            messages=[{"role": m["role"], "content": m["content"]} for m in messages],
+                        )
+                        text = "".join(b.text for b in resp2.content if b.type == "text")
+                    except Exception as e:  # noqa: BLE001
+                        yield {"type": "error", "content": f"웹 검색 후 답변 오류: {e}"}
+                        return
+                    yield {"type": "text", "content": text or NO_GROUND_MSG}
+                    yield {"type": "done"}
+                    return
             yield {"type": "text", "content": _guard_answer(text, has_doc, used_tool)}
             yield {"type": "done"}
             return
@@ -184,7 +248,33 @@ def run_local(messages: list[dict], model: str | None = None, doc_min_score: flo
         msg = data.get("message", {})
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
-            yield {"type": "text", "content": _guard_answer(msg.get("content", ""), has_doc, used_tool)}
+            content = msg.get("content", "")
+            if STRICT_GROUNDING and not has_doc and not used_tool:
+                q = _last_user_text(messages)
+                web = _web_fallback_context(q)
+                if web:
+                    yield {"type": "tool", "name": "web_search", "input": {"query": q}}
+                    try:
+                        r2 = httpx.post(
+                            f"{base}/api/chat",
+                            json={
+                                "model": model,
+                                "messages": [{"role": "system", "content": SYSTEM_PROMPT + web}]
+                                + [{"role": m["role"], "content": m["content"]} for m in messages],
+                                "stream": False,
+                                "options": {"temperature": 0},
+                            },
+                            timeout=120.0,
+                        )
+                        r2.raise_for_status()
+                        content = r2.json().get("message", {}).get("content", "")
+                    except Exception as e:  # noqa: BLE001
+                        yield {"type": "error", "content": f"웹 검색 후 답변 오류: {e}"}
+                        return
+                    yield {"type": "text", "content": content or NO_GROUND_MSG}
+                    yield {"type": "done"}
+                    return
+            yield {"type": "text", "content": _guard_answer(content, has_doc, used_tool)}
             yield {"type": "done"}
             return
 
