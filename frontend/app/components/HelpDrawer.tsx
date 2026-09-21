@@ -19,6 +19,28 @@ const ACTION_EX: Record<string, string[]> = {
 
 const ACTION_LABEL: Record<string, string> = { create: "등록", update: "수정" };
 
+// 도구 → '출처 카테고리'. 답변이 실제로 무엇을 근거로 했는지 배지로 보여줘 오해를 없앤다.
+const SOURCE: Record<string, { label: string; cls: string }> = {
+  web_search: { label: "🌐 웹 검색", cls: "border-freight text-freight bg-freight-tint" },
+  search_documents: { label: "📄 사내 문서", cls: "border-brand text-brand-strong bg-brand-tint" },
+  doc_context: { label: "📄 사내 문서", cls: "border-brand text-brand-strong bg-brand-tint" },
+};
+// 문서 근거 도구(이게 실제로 호출됐을 때만 '참고 문서'를 노출한다)
+const DOC_TOOLS = new Set(["doc_context", "search_documents"]);
+
+function sourceBadges(tools: string[]): { label: string; cls: string }[] {
+  const seen = new Set<string>();
+  const out: { label: string; cls: string }[] = [];
+  for (const t of tools) {
+    const s = SOURCE[t] ?? { label: "📊 ERP 데이터", cls: "border-ink-2 text-ink bg-surface-2" };
+    if (!seen.has(s.label)) {
+      seen.add(s.label);
+      out.push(s);
+    }
+  }
+  return out;
+}
+
 export default function HelpDrawer() {
   const pathname = usePathname();
   const help = screenHelp(pathname);
@@ -40,6 +62,7 @@ export default function HelpDrawer() {
   const [asked, setAsked] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<RagSearchHit[]>([]);
+  const [usedTools, setUsedTools] = useState<string[]>([]); // 이 답변이 실제 호출한 도구(=출처)
   const [searching, setSearching] = useState(false);
 
   // action
@@ -50,19 +73,19 @@ export default function HelpDrawer() {
   const ask = async (text: string) => {
     const q = text.trim();
     if (!q || busy) return;
-    setAsked(q); setAnswer(""); setSources([]); setBusy(true); setSearching(false); setInput("");
-    // 참고 문서는 '실제 근거'만 — 유사도 임계값(0.45) 미만은 무관한 최근접이라 표시하지 않는다.
-    api
-      .ragSearch(q, 3)
-      .then((r) => setSources((r.results ?? []).filter((h) => h.score >= 0.45)))
-      .catch(() => {});
+    setAsked(q); setAnswer(""); setSources([]); setUsedTools([]); setBusy(true); setSearching(false); setInput("");
+    // 참고 문서는 '실제 근거'만 노출한다. 답변과 무관하게 최근접 문서를 미리 뽑아 보여주면
+    // 웹검색으로 답했는데도 사내 문서가 딸려 나와 마치 근거처럼 오해된다(할루시네이션처럼 보임).
+    // 그래서 스트림에서 '문서 도구'가 실제 호출됐을 때만 아래에서 제목을 가져온다.
+    const used = new Set<string>();
     try {
       const res = await fetch(`${BASE}/chat`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
           messages: [{ role: "user", content: `[${help.title} 화면] ${q}` }],
-          doc_min_score: 0.35,
+          // 임계값은 백엔드 기본(0.50)을 쓴다. 예전엔 0.35로 낮췄으나, 무관한 질문에도
+          // 사내 문서가 주입돼 오답 근거가 붙는 부작용이 커서 제거함.
         }),
       });
       if (!res.ok || !res.body) throw new Error(`서버 오류 (${res.status})`);
@@ -78,9 +101,23 @@ export default function HelpDrawer() {
           const line = part.trim();
           if (!line.startsWith("data:")) continue;
           const evt = JSON.parse(line.slice(5).trim());
-          if (evt.type === "tool") setSearching(true);
-          else if (evt.type === "text") setAnswer((a) => a + evt.content);
+          if (evt.type === "tool") {
+            used.add(evt.name);
+            setUsedTools([...used]);
+            setSearching(true);
+          } else if (evt.type === "text") setAnswer((a) => a + evt.content);
           else if (evt.type === "error") setAnswer((a) => a + `⚠️ ${evt.content}`);
+        }
+      }
+      // 답변이 '실제로' 사내 문서를 근거로 했을 때만 제목을 가져와 표시한다.
+      const usedDoc = [...used].some((t) => DOC_TOOLS.has(t));
+      if (usedDoc) {
+        try {
+          const r = await api.ragSearch(q, 3);
+          // 자동 주입 임계값(0.50)과 동일하게 걸러 실제 근거가 된 문서만 노출한다.
+          setSources((r.results ?? []).filter((h) => h.score >= 0.5));
+        } catch {
+          /* 제목 조회 실패는 무시 — 답변 자체는 이미 표시됨 */
         }
       }
     } catch (e) {
@@ -271,6 +308,24 @@ export default function HelpDrawer() {
                   <div className="text-sm font-medium text-ink">Q. {asked}</div>
                   {searching && !answer && <div className="text-xs text-ink-3">🔎 지식 문서 검색 중…</div>}
                   {!answer && !searching && busy && <div className="text-xs text-ink-3">답변 생성 중…</div>}
+                  {answer && !answer.startsWith("⚠️") && (
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="mr-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-3">근거</span>
+                      {usedTools.length > 0 ? (
+                        sourceBadges(usedTools).map((s, j) => (
+                          <span key={j} className={`rounded-full border px-2 py-0.5 font-mono text-[11px] ${s.cls}`}>
+                            {s.label}
+                          </span>
+                        ))
+                      ) : (
+                        !answer.includes("찾을 수 없습니다") && (
+                          <span className="rounded-full border border-danger/40 bg-danger-tint px-2 py-0.5 font-mono text-[11px] text-danger">
+                            🧠 모델 지식(근거 없음)
+                          </span>
+                        )
+                      )}
+                    </div>
+                  )}
                   {answer && <div className="whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{answer}</div>}
                   {sources.length > 0 && (
                     <div className="pt-2">
