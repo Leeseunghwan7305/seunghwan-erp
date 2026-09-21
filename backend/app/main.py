@@ -8,6 +8,7 @@ from sqlalchemy.exc import OperationalError
 
 from .agent.router import router as agent_router
 from .chat.router import router as chat_router
+from .integrations.router import router as integrations_router
 from .database import create_db_and_tables, engine
 from .rag.router import router as rag_router
 from .routers import accounts, dashboard, employees, expenses, items, orders, partners, roles
@@ -57,6 +58,7 @@ app.include_router(expenses.router)
 app.include_router(chat_router)
 app.include_router(rag_router)
 app.include_router(agent_router)
+app.include_router(integrations_router)
 
 
 @app.get("/health", tags=["meta"])

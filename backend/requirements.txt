@@ -9,3 +9,4 @@ httpx==0.27.2
 pypdf==5.1.0
 numpy==2.1.3
 python-multipart==0.0.20
+ddgs>=9.6

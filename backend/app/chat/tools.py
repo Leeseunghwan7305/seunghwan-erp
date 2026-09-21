@@ -2,6 +2,7 @@
 
 Phase A: 조회 전용(read-only). 도구는 기존 ERP 데이터를 그대로 조회한다.
 """
+import json
 from typing import Any
 
 from sqlmodel import Session, select
@@ -68,6 +69,17 @@ TOOL_DEFS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "검색할 자연어 질의"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "web_search",
+        "description": "사내 데이터·문서로 답할 수 없는 '외부 정보'(시세·환율·일반 지식·최신 뉴스 등)를 웹에서 검색한다. 사내 재고·주문·규정은 다른 도구를 써라. 읽기 전용이라 안전하다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "웹 검색어"},
             },
             "required": ["query"],
         },
@@ -201,25 +213,56 @@ def _search_documents(session: Session, query: str = "") -> Any:
     ]
 
 
+def _web_search(session: Session, query: str = "", max_results: int = 5) -> Any:
+    """DuckDuckGo 웹 검색(무키, 읽기 전용). session 인자는 규격 통일용(미사용)."""
+    q = (query or "").strip()
+    if not q:
+        return {"error": "검색어가 비었습니다."}
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        return {"error": "ddgs 패키지가 설치되지 않았습니다(pip install ddgs)."}
+    try:
+        with DDGS() as d:
+            hits = list(d.text(q, max_results=max_results))
+    except Exception as e:  # noqa: BLE001 - 네트워크·rate limit 등 모델에 전달
+        return {"error": f"웹 검색 실패: {e}"}
+    if not hits:
+        return {"결과": "웹 검색 결과가 없습니다."}
+    return [
+        {"제목": h.get("title"), "요약": h.get("body"), "링크": h.get("href")}
+        for h in hits
+    ]
+
+
 _HANDLERS = {
     "get_dashboard": _get_dashboard,
     "get_inventory": _get_inventory,
     "list_orders": _list_orders,
     "list_partners": _list_partners,
     "search_documents": _search_documents,
+    "web_search": _web_search,
 }
 
 
-def execute_tool(name: str, args: dict[str, Any]) -> Any:
-    """도구를 실행하고 JSON 직렬화 가능한 결과를 반환한다."""
+def execute_tool(name: str, args: dict[str, Any], actor: str | None = None) -> Any:
+    """도구를 실행하고 JSON 직렬화 가능한 결과를 반환한다. 모든 호출은 감사 로그에 남는다."""
+    from ..audit import record
+
     handler = _HANDLERS.get(name)
     if not handler:
+        record(f"tool:{name}", "알 수 없는 도구", ok=False, actor=actor)
         return {"error": f"알 수 없는 도구: {name}"}
     args = args or {}
-    with Session(engine) as session:
-        try:
-            return handler(session, **args)
-        except TypeError as e:
-            return {"error": f"도구 인자 오류: {e}"}
-        except Exception as e:  # noqa: BLE001 - 프로토타입: 오류를 모델에 전달
-            return {"error": f"도구 실행 오류: {e}"}
+    try:
+        with Session(engine) as session:
+            result = handler(session, **args)
+        ok = not (isinstance(result, dict) and "error" in result)
+        record(f"tool:{name}", json.dumps(args, ensure_ascii=False), ok=ok, actor=actor)
+        return result
+    except TypeError as e:
+        record(f"tool:{name}", f"인자 오류: {e}", ok=False, actor=actor)
+        return {"error": f"도구 인자 오류: {e}"}
+    except Exception as e:  # noqa: BLE001 - 프로토타입: 오류를 모델에 전달
+        record(f"tool:{name}", str(e), ok=False, actor=actor)
+        return {"error": f"도구 실행 오류: {e}"}

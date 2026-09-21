@@ -160,6 +160,18 @@ class Expense(SQLModel, table=True):
     amount: int = 0
 
 
+# ---- 감사 로그 -----------------------------------------------------------
+
+class AuditLog(SQLModel, table=True):
+    """도구 호출·외부 전송 등 AI 행동의 감사 기록. '누가·무엇을·성공여부'."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ts: datetime = Field(default_factory=datetime.utcnow)
+    actor: Optional[str] = None      # 호출 주체(로그인 사용자명 등)
+    action: str                       # 예: "tool:web_search", "slack:send"
+    detail: Optional[str] = None      # 인자/메시지 요약
+    ok: bool = True
+
+
 # ---- AI: RAG 지식 문서 ----------------------------------------------------
 
 class DocSourceType(str, Enum):

@@ -21,6 +21,7 @@ const TOOL_LABEL: Record<string, string> = {
   list_orders: "주문 조회",
   list_partners: "거래처 조회",
   search_documents: "지식 문서 검색",
+  web_search: "웹 검색",
 };
 
 const SUGGESTIONS = [
@@ -71,6 +72,29 @@ export default function ChatPage() {
       sessionStorage.removeItem(STORAGE_KEY);
     } catch {
       /* ignore */
+    }
+  };
+
+  // 슬랙 전송 — 부작용이라 반드시 사용자 확인 후에만.
+  const sendToSlack = async (text: string) => {
+    if (!text.trim() || text.startsWith("⚠️")) return;
+    if (!window.confirm(`이 내용을 슬랙으로 보낼까요?\n\n${text.slice(0, 300)}`)) return;
+    let actor: string | undefined;
+    try {
+      actor = JSON.parse(localStorage.getItem("erp_current_user") || "{}").name;
+    } catch {
+      /* ignore */
+    }
+    try {
+      const res = await fetch(`${BASE}/integrations/slack/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, actor }),
+      });
+      const r = await res.json();
+      alert(r.ok ? "✅ 슬랙으로 전송했습니다." : `⚠️ ${r.error}`);
+    } catch (e) {
+      alert(`⚠️ ${(e as Error).message}`);
     }
   };
 
@@ -229,6 +253,16 @@ export default function ChatPage() {
                 ) : (
                   ""
                 ))}
+              {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") && (
+                <div className="mt-2 border-t border-line pt-2">
+                  <button
+                    onClick={() => sendToSlack(m.content)}
+                    className="rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-2 transition-colors hover:border-brand hover:text-brand"
+                  >
+                    ↗ 슬랙으로 보내기
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ))}
