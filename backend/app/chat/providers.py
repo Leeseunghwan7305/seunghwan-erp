@@ -105,6 +105,8 @@ def run_claude(messages: list[dict], model: str | None = None, doc_min_score: fl
     used_tool = False
     system = SYSTEM_PROMPT + CLAUDE_TERSE + doc_ctx
     conv = [{"role": m["role"], "content": m["content"]} for m in messages]
+    if has_doc:
+        yield {"type": "tool", "name": "doc_context"}  # 문서 근거 자동 주입됨(출처 표시용)
 
     for _ in range(MAX_TOOL_ROUNDS):
         try:
@@ -153,6 +155,8 @@ def run_local(messages: list[dict], model: str | None = None, doc_min_score: flo
     used_tool = False
     conv: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT + doc_ctx}]
     conv += [{"role": m["role"], "content": m["content"]} for m in messages]
+    if has_doc:
+        yield {"type": "tool", "name": "doc_context"}  # 문서 근거 자동 주입됨(출처 표시용)
 
     for _ in range(MAX_TOOL_ROUNDS):
         try:

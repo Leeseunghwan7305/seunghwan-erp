@@ -15,14 +15,30 @@ interface Msg {
   tools?: string[]; // 이 답변을 만들며 호출한 도구 이름들
 }
 
-const TOOL_LABEL: Record<string, string> = {
-  get_dashboard: "현황 요약 조회",
-  get_inventory: "재고 조회",
-  list_orders: "주문 조회",
-  list_partners: "거래처 조회",
-  search_documents: "지식 문서 검색",
-  web_search: "웹 검색",
+// 도구 → '출처 카테고리'(무엇을 근거로 답했나). 색으로 구분해 할루시네이션 오해를 없앤다.
+const SOURCE: Record<string, { label: string; cls: string }> = {
+  web_search: { label: "🌐 웹 검색", cls: "border-freight text-freight bg-freight-tint" },
+  search_documents: { label: "📄 사내 문서", cls: "border-brand text-brand-strong bg-brand-tint" },
+  doc_context: { label: "📄 사내 문서", cls: "border-brand text-brand-strong bg-brand-tint" },
+  get_dashboard: { label: "📊 ERP 데이터", cls: "border-ink-2 text-ink bg-surface-2" },
+  get_inventory: { label: "📊 ERP 데이터", cls: "border-ink-2 text-ink bg-surface-2" },
+  list_orders: { label: "📊 ERP 데이터", cls: "border-ink-2 text-ink bg-surface-2" },
+  list_partners: { label: "📊 ERP 데이터", cls: "border-ink-2 text-ink bg-surface-2" },
 };
+
+// 답변의 도구 목록 → 중복 없는 출처 배지 목록.
+function sourceBadges(tools: string[] | undefined): { label: string; cls: string }[] {
+  const seen = new Set<string>();
+  const out: { label: string; cls: string }[] = [];
+  for (const t of tools ?? []) {
+    const s = SOURCE[t] ?? { label: t, cls: "border-line text-ink-2 bg-surface" };
+    if (!seen.has(s.label)) {
+      seen.add(s.label);
+      out.push(s);
+    }
+  }
+  return out;
+}
 
 const SUGGESTIONS = [
   "탄산수 재고 얼마나 있어?",
@@ -145,7 +161,7 @@ export default function ChatPage() {
           if (evt.type === "tool") {
             patchLast((m) => ({
               ...m,
-              tools: [...(m.tools ?? []), TOOL_LABEL[evt.name] ?? evt.name],
+              tools: [...(m.tools ?? []), evt.name], // 원본 도구명 저장 → 렌더 시 출처 배지로 변환
             }));
           } else if (evt.type === "text") {
             patchLast((m) => ({ ...m, content: m.content + evt.content }));
@@ -235,16 +251,26 @@ export default function ChatPage() {
                   : "rounded-bl-sm border border-line bg-surface-2 text-ink"
               }`}
             >
-              {m.tools && m.tools.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1">
-                  {m.tools.map((t, j) => (
+              {m.role === "assistant" && (m.content || (m.tools && m.tools.length > 0)) && (
+                <div className="mb-2 flex flex-wrap items-center gap-1">
+                  <span className="mr-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-3">근거</span>
+                  {sourceBadges(m.tools).map((s, j) => (
                     <span
                       key={j}
-                      className="rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[11px] text-ink-2"
+                      className={`rounded-full border px-2 py-0.5 font-mono text-[11px] ${s.cls}`}
                     >
-                      {t}
+                      {s.label}
                     </span>
                   ))}
+                  {/* 도구를 하나도 안 쓰고 답한 경우(=모델 자체 지식) 경고 */}
+                  {(!m.tools || m.tools.length === 0) &&
+                    m.content &&
+                    !m.content.startsWith("⚠️") &&
+                    !m.content.includes("찾을 수 없습니다") && (
+                      <span className="rounded-full border border-danger/40 bg-danger-tint px-2 py-0.5 font-mono text-[11px] text-danger">
+                        🧠 모델 지식(근거 없음)
+                      </span>
+                    )}
                 </div>
               )}
               {m.content ||
