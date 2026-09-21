@@ -51,7 +51,11 @@ export default function HelpDrawer() {
     const q = text.trim();
     if (!q || busy) return;
     setAsked(q); setAnswer(""); setSources([]); setBusy(true); setSearching(false); setInput("");
-    api.ragSearch(q, 3).then((r) => setSources(r.results ?? [])).catch(() => {});
+    // 참고 문서는 '실제 근거'만 — 유사도 임계값(0.45) 미만은 무관한 최근접이라 표시하지 않는다.
+    api
+      .ragSearch(q, 3)
+      .then((r) => setSources((r.results ?? []).filter((h) => h.score >= 0.45)))
+      .catch(() => {});
     try {
       const res = await fetch(`${BASE}/chat`, {
         method: "POST", headers: { "Content-Type": "application/json" },
