@@ -258,7 +258,7 @@ def run_claude_cookie(messages: list[dict]) -> Iterator[dict]:
     # 첫 프롬프트: 프리앰블 + 자동 문서 검색 근거 + 도구 규약 + 지금까지의 대화 이력
     from ..rag.retrieval import context_for
 
-    from .providers import _guard_answer
+    from .providers import _guard_answer, _stream_chunks
 
     last_user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
     doc_ctx = context_for(last_user)
@@ -279,7 +279,8 @@ def run_claude_cookie(messages: list[dict]) -> Iterator[dict]:
                 text, parent = _completion(client, org_id, conv_id, prompt, parent)
                 call = _extract_tool_call(text)
                 if not call:
-                    yield {"type": "text", "content": _guard_answer(text, has_doc, used_tool)}
+                    # 쿠키 경로는 도구 판별 위해 전체 답을 받은 뒤라, 조각내어 점진 렌더 UX 제공.
+                    yield from _stream_chunks(_guard_answer(text, has_doc, used_tool))
                     yield {"type": "done"}
                     return
                 used_tool = True

@@ -9,11 +9,27 @@
 """
 import json
 import os
+import time
 from typing import Any, Iterator
 
 import httpx
 
 from .tools import TOOL_DEFS, execute_tool
+
+
+def _stream_chunks(text: str) -> Iterator[dict]:
+    """완성된 텍스트를 작은 조각으로 나눠 스트리밍처럼 내보낸다.
+
+    Ollama처럼 실시간 토큰 스트리밍이 되는 경로는 델타를 그대로 흘려보내면 되지만,
+    쿠키·API 경로는 도구 판별 등을 위해 전체 답을 받은 뒤라, 여기서 점진적으로 쪼개
+    프론트에서 '타이핑되는' 렌더 UX를 준다.
+    """
+    if not text:
+        return
+    step = 3
+    for i in range(0, len(text), step):
+        yield {"type": "text", "content": text[i : i + step]}
+        time.sleep(0.012)
 
 
 def _last_user_text(messages: list[dict]) -> str:
@@ -186,10 +202,10 @@ def run_claude(messages: list[dict], model: str | None = None, doc_min_score: fl
                     except Exception as e:  # noqa: BLE001
                         yield {"type": "error", "content": f"웹 검색 후 답변 오류: {e}"}
                         return
-                    yield {"type": "text", "content": text or NO_GROUND_MSG}
+                    yield from _stream_chunks(text or NO_GROUND_MSG)
                     yield {"type": "done"}
                     return
-            yield {"type": "text", "content": _guard_answer(text, has_doc, used_tool)}
+            yield from _stream_chunks(_guard_answer(text, has_doc, used_tool))
             yield {"type": "done"}
             return
 
@@ -223,21 +239,42 @@ def run_local(messages: list[dict], model: str | None = None, doc_min_score: flo
         yield {"type": "tool", "name": "doc_context"}  # 문서 근거 자동 주입됨(출처 표시용)
 
     for _ in range(MAX_TOOL_ROUNDS):
+        # 근거가 이미 있으면(문서 주입/이전 도구 호출) 최종답을 실시간 스트리밍해도 안전하다.
+        # 근거 없는 첫 답변은 버퍼링 후 가드/웹폴백을 적용해야 하므로 스트리밍하지 않는다.
+        can_stream = has_doc or used_tool
+        content_parts: list[str] = []
+        tool_calls: list[dict] = []
         try:
-            r = httpx.post(
+            with httpx.stream(
+                "POST",
                 f"{base}/api/chat",
                 json={
                     "model": model,
                     "messages": conv,
                     "tools": _ollama_tools(),
-                    "stream": False,
-                    # 문서 밖 내용을 지어내거나 섞지 않도록 결정적으로.
+                    "stream": True,
                     "options": {"temperature": 0},
                 },
                 timeout=120.0,
-            )
-            r.raise_for_status()
-            data = r.json()
+            ) as r:
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    chunk = obj.get("message", {}) or {}
+                    delta = chunk.get("content") or ""
+                    if delta:
+                        content_parts.append(delta)
+                        if can_stream:
+                            yield {"type": "text", "content": delta}  # 실시간 델타
+                    if chunk.get("tool_calls"):
+                        tool_calls.extend(chunk["tool_calls"])
+                    if obj.get("done"):
+                        break
         except httpx.ConnectError:
             yield {"type": "error", "content": f"Ollama 서버에 연결할 수 없습니다({base}). 'ollama serve'로 실행하세요."}
             return
@@ -245,41 +282,62 @@ def run_local(messages: list[dict], model: str | None = None, doc_min_score: flo
             yield {"type": "error", "content": f"로컬 LLM 호출 오류: {e}"}
             return
 
-        msg = data.get("message", {})
-        tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
-            content = msg.get("content", "")
+            content = "".join(content_parts)
+            # 근거 없이 자기지식으로 답하려는 경우 → 서버가 대신 웹검색을 돌려 근거를 만든다.
             if STRICT_GROUNDING and not has_doc and not used_tool:
                 q = _last_user_text(messages)
                 web = _web_fallback_context(q)
                 if web:
                     yield {"type": "tool", "name": "web_search", "input": {"query": q}}
                     try:
-                        r2 = httpx.post(
+                        got = False
+                        with httpx.stream(
+                            "POST",
                             f"{base}/api/chat",
                             json={
                                 "model": model,
                                 "messages": [{"role": "system", "content": SYSTEM_PROMPT + web}]
-                                + [{"role": m["role"], "content": m["content"]} for m in messages],
-                                "stream": False,
+                                + [{"role": mm["role"], "content": mm["content"]} for mm in messages],
+                                "stream": True,
                                 "options": {"temperature": 0},
                             },
                             timeout=120.0,
-                        )
-                        r2.raise_for_status()
-                        content = r2.json().get("message", {}).get("content", "")
+                        ) as r2:
+                            r2.raise_for_status()
+                            for line in r2.iter_lines():
+                                if not line:
+                                    continue
+                                try:
+                                    obj = json.loads(line)
+                                except json.JSONDecodeError:
+                                    continue
+                                d = (obj.get("message", {}) or {}).get("content") or ""
+                                if d:
+                                    got = True
+                                    yield {"type": "text", "content": d}  # 웹 근거 있으니 실시간
+                                if obj.get("done"):
+                                    break
+                        if not got:
+                            yield {"type": "text", "content": NO_GROUND_MSG}
                     except Exception as e:  # noqa: BLE001
                         yield {"type": "error", "content": f"웹 검색 후 답변 오류: {e}"}
                         return
-                    yield {"type": "text", "content": content or NO_GROUND_MSG}
                     yield {"type": "done"}
                     return
-            yield {"type": "text", "content": _guard_answer(content, has_doc, used_tool)}
+                # 웹폴백도 실패 → 근거 없음 문구
+                yield {"type": "text", "content": NO_GROUND_MSG}
+                yield {"type": "done"}
+                return
+            # 스트리밍하지 않은(근거 없이 비-STRICT) 경우엔 여기서 한 번에 내보낸다.
+            if not can_stream:
+                yield {"type": "text", "content": _guard_answer(content, has_doc, used_tool)}
             yield {"type": "done"}
             return
 
+        # 도구 호출 있음 → 실행 후 다음 라운드
         used_tool = True
-        conv.append(msg)
+        conv.append({"role": "assistant", "content": "".join(content_parts), "tool_calls": tool_calls})
         for tc in tool_calls:
             fn = tc.get("function", {})
             name = fn.get("name", "")
