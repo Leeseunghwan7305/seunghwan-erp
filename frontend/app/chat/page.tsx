@@ -84,10 +84,28 @@ function ChatInner() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showJump, setShowJump] = useState(false); // '↓ 최신으로' 버튼 노출
+  const [toast, setToast] = useState<string | null>(null); // 비침습 알림
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<Msg[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const stick = useRef(true); // 하단 고정(자동 스크롤) 여부
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 1800);
+  };
+
+  // 입력창 자동 높이(내용에 맞춰 늘고 최대 높이에서 스크롤).
+  const autoGrow = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  };
 
   const setMsgs = (updater: Msg[] | ((p: Msg[]) => Msg[])) =>
     setMessages((prev) => {
@@ -137,16 +155,29 @@ function ChatInner() {
     if (el) el.scrollTop = el.scrollHeight;
   };
 
-  // 스트리밍 중 하단 고정: 사용자가 위로 스크롤하면 고정 해제.
+  const jumpToBottom = () => {
+    stick.current = true;
+    setShowJump(false);
+    requestAnimationFrame(scrollToBottom);
+  };
+
+  // 스트리밍 중 하단 고정: 사용자가 위로 스크롤하면 고정 해제하고 '↓ 최신으로' 노출.
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    stick.current = atBottom;
+    setShowJump(!atBottom && messages.length > 0);
   };
 
   useEffect(() => {
     if (stick.current) requestAnimationFrame(scrollToBottom);
   }, [messages]);
+
+  // 입력 내용이 바뀌면(전송 후 비워짐 포함) 입력창 높이 재계산.
+  useEffect(() => {
+    autoGrow();
+  }, [input]);
 
   const clearCurrent = () => {
     if (busy || !cid) return;
@@ -191,9 +222,27 @@ function ChatInner() {
         body: JSON.stringify({ message: text, actor }),
       });
       const r = await res.json();
-      alert(r.ok ? "✅ 슬랙으로 전송했습니다." : `⚠️ ${r.error}`);
+      showToast(r.ok ? "✅ 슬랙으로 전송했습니다." : `⚠️ ${r.error}`);
     } catch (e) {
-      alert(`⚠️ ${(e as Error).message}`);
+      showToast(`⚠️ ${(e as Error).message}`);
+    }
+  };
+
+  // 답변 복사(클립보드 미지원 환경 폴백 포함).
+  const copyText = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+      else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      showToast("복사되었습니다");
+    } catch {
+      showToast("⚠️ 복사 실패");
     }
   };
 
@@ -329,8 +378,22 @@ function ChatInner() {
             </span>
           )
         ) : null}
-        {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") && (
-          <div className="mt-2 border-t border-line pt-2">
+        {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") && !busy && (
+          <div className="mt-2 flex flex-wrap gap-1.5 border-t border-line pt-2">
+            <button
+              onClick={() => copyText(m.content)}
+              className="rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-2 transition-colors hover:border-brand hover:text-brand"
+            >
+              ⧉ 복사
+            </button>
+            {i === messages.length - 1 && (
+              <button
+                onClick={retry}
+                className="rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-2 transition-colors hover:border-brand hover:text-brand"
+              >
+                ↻ 다시 생성
+              </button>
+            )}
             <button
               onClick={() => sendToSlack(m.content)}
               className="rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-2 transition-colors hover:border-brand hover:text-brand"
@@ -437,10 +500,11 @@ function ChatInner() {
       />
 
       {/* 메시지 영역 (가상화) */}
+      <div className="relative min-h-0 flex-1">
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto rounded-card border border-line bg-surface p-5"
+        className="h-full overflow-y-auto rounded-card border border-line bg-surface p-5"
       >
         {messages.length === 0 ? (
           <div>
@@ -478,6 +542,20 @@ function ChatInner() {
           </div>
         )}
       </div>
+        {showJump && (
+          <button
+            onClick={jumpToBottom}
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-ink-2 shadow-md transition-colors hover:border-brand hover:text-brand"
+          >
+            ↓ 최신으로
+          </button>
+        )}
+        {toast && (
+          <div className="absolute bottom-4 right-4 rounded-lg bg-brand-strong px-3 py-2 text-xs font-medium text-white shadow-lg">
+            {toast}
+          </div>
+        )}
+      </div>
 
       {/* 입력 */}
       <form
@@ -485,14 +563,24 @@ function ChatInner() {
           e.preventDefault();
           send(input);
         }}
-        className="mt-4 flex gap-2"
+        className="mt-4 flex items-end gap-2"
       >
-        <input
-          className="flex-1 rounded-lg border border-line bg-surface px-4 py-3 text-sm text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none"
-          placeholder="예) 안전재고 미달 품목 알려줘"
+        <textarea
+          ref={inputRef}
+          rows={1}
+          className="max-h-40 flex-1 resize-none rounded-lg border border-line bg-surface px-4 py-3 text-sm text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none"
+          placeholder="예) 안전재고 미달 품목 알려줘  (Shift+Enter 줄바꿈)"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          disabled={busy}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send(input);
+            } else if (e.key === "Escape" && busy) {
+              e.preventDefault();
+              stop();
+            }
+          }}
         />
         {busy ? (
           <button
