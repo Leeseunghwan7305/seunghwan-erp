@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import PageHeader from "../components/PageHeader";
+import Markdown from "../components/Markdown";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -53,6 +54,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null); // 생성 중단(Stop)용
   const firstPersist = useRef(true); // 마운트 시 빈 상태로 저장본을 덮어쓰지 않도록
 
   // 복원: 마운트 후 sessionStorage에서 대화·모델을 읽는다(SSR 하이드레이션 충돌 방지).
@@ -119,6 +121,9 @@ export default function ChatPage() {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
     );
 
+  // 생성 중단 — 진행 중인 요청을 취소한다(부분 응답은 그대로 남긴다).
+  const stop = () => abortRef.current?.abort();
+
   const send = async (text: string) => {
     if (!text.trim() || busy) return;
     const history: Msg[] = [...messages, { role: "user", content: text }];
@@ -126,6 +131,9 @@ export default function ChatPage() {
     setInput("");
     setBusy(true);
     scrollDown();
+
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     const patchLast = (fn: (m: Msg) => Msg) =>
       setMessages((prev) => {
@@ -142,6 +150,7 @@ export default function ChatPage() {
           model,
           messages: history.map((m) => ({ role: m.role, content: m.content })),
         }),
+        signal: controller.signal,
       });
       if (!res.ok || !res.body) throw new Error(`서버 오류 (${res.status})`);
 
@@ -172,8 +181,14 @@ export default function ChatPage() {
         }
       }
     } catch (e) {
-      patchLast((m) => ({ ...m, content: `⚠️ ${(e as Error).message}` }));
+      // Stop으로 취소된 경우: 에러가 아니라 '중단'이므로 부분 응답을 유지한다.
+      if ((e as Error).name === "AbortError") {
+        patchLast((m) => ({ ...m, content: m.content || "(중단됨)" }));
+      } else {
+        patchLast((m) => ({ ...m, content: `⚠️ ${(e as Error).message}` }));
+      }
     } finally {
+      abortRef.current = null;
       setBusy(false);
       scrollDown();
     }
@@ -245,7 +260,7 @@ export default function ChatPage() {
             }`}
           >
             <div
-              className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+              className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                 m.role === "user"
                   ? "rounded-br-sm bg-brand text-white"
                   : "rounded-bl-sm border border-line bg-surface-2 text-ink"
@@ -273,12 +288,17 @@ export default function ChatPage() {
                     )}
                 </div>
               )}
-              {m.content ||
-                (m.role === "assistant" && busy ? (
-                  <span className="text-ink-3">생각 중…</span>
-                ) : (
-                  ""
-                ))}
+              {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") ? (
+                <Markdown text={m.content} />
+              ) : m.content ? (
+                <span className="whitespace-pre-wrap">{m.content}</span>
+              ) : m.role === "assistant" && busy ? (
+                <span className="inline-flex items-center gap-1 text-ink-3">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.3s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.15s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3" />
+                </span>
+              ) : null}
               {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") && (
                 <div className="mt-2 border-t border-line pt-2">
                   <button
@@ -309,13 +329,24 @@ export default function ChatPage() {
           onChange={(e) => setInput(e.target.value)}
           disabled={busy}
         />
-        <button
-          type="submit"
-          disabled={busy || !input.trim()}
-          className="rounded-lg bg-brand px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
-        >
-          전송
-        </button>
+        {busy ? (
+          <button
+            type="button"
+            onClick={stop}
+            className="inline-flex items-center gap-2 rounded-lg border border-danger/50 bg-danger-tint px-6 py-3 text-sm font-medium text-danger transition-colors hover:bg-danger/10"
+          >
+            <span className="h-2.5 w-2.5 rounded-[2px] bg-danger" />
+            중지
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!input.trim()}
+            className="rounded-lg bg-brand px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
+          >
+            전송
+          </button>
+        )}
       </form>
     </div>
   );
