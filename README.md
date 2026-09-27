@@ -141,7 +141,9 @@ AI 어시스턴트 화면(`/chat`)은 7단계로 설계·구현했습니다.
 
 관련 코드: `frontend/app/chat/page.tsx`, `frontend/app/components/Markdown.tsx`(의존성 없는 경량 렌더러), `frontend/app/lib/conversations.ts`, `frontend/app/providers.tsx`(QueryClient).
 
-## 테스트 (E2E)
+## 테스트
+
+### E2E (Playwright)
 
 ```bash
 cd frontend
@@ -152,6 +154,16 @@ npx playwright test               # 백엔드·Ollama·프론트가 실행 중�
 - `frontend/e2e/chat.spec.ts` — 스트리밍 → 근거 배지 → 본문 렌더 플로우 검증(로컬 `qwen2.5:7b` 기준, **통과**).
 - 로그인 게이트는 `addInitScript`로 `ai` 권한 사용자를 주입해 통과합니다.
 - 중지(stop) 테스트는 grounding 답변이 ~3초로 매우 빨라 자동화가 불안정 → 사유 명시 후 `skip`(기능 자체는 구현·수동검증 완료).
+
+### RAG·에이전트 라우팅 Eval (측정 하네스)
+
+```bash
+cd backend && ../.venv/bin/python eval/run_eval.py   # DB + Ollama 필요
+```
+
+- `backend/eval/golden.jsonl` — “질문 → 기대 근거경로(web/doc/db/none)” 골든셋.
+- 답변 텍스트가 아니라 **에이전트가 어떤 근거로 답했는지(라우팅)** 를 채점해, 모델이 흔들려도 회귀(예: 웹 질문에 사내 문서가 딸려오는 근거 오염)를 안정적으로 잡습니다.
+- 임계값·프롬프트를 바꿀 때마다 돌려 회귀를 확인 — 종료코드로 CI 연결 가능. **현재 10/10 통과(라우팅 100%).**
 
 ## 주요 API
 

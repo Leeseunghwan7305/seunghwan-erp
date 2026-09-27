@@ -1,0 +1,10 @@
+{"id": "inv-carbonated", "question": "탄산수 재고 얼마나 있어", "expect_source": "db"}
+{"id": "inv-below-safety", "question": "안전재고 미달인 품목 알려줘", "expect_source": "db"}
+{"id": "dash-summary", "question": "이번 현황 요약해줘 매출이랑 미수금 포함해서", "expect_source": "db"}
+{"id": "orders-confirmed", "question": "확정된 발주 주문 보여줘", "expect_source": "db"}
+{"id": "partners-list", "question": "등록된 거래처 목록 보여줘", "expect_source": "db"}
+{"id": "doc-safety-def", "question": "안전재고가 뭔가요", "expect_source": "doc", "expect_contains": ["안전재고"]}
+{"id": "doc-item-register", "question": "품목은 어떻게 등록하나요", "expect_source": "doc"}
+{"id": "doc-order-confirm", "question": "수주를 확정하면 어떻게 되나요", "expect_source": "doc"}
+{"id": "web-bitcoin", "question": "비트코인 시세 알려줘", "expect_source": "web"}
+{"id": "web-usd-krw", "question": "지금 원달러 환율 알려줘", "expect_source": "web"}
