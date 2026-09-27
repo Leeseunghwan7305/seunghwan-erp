@@ -142,7 +142,7 @@ function AddDocument({ onAdded }: { onAdded: () => void }) {
                 : "bg-surface text-ink-2 hover:text-ink"
             }`}
           >
-            {m === "paste" ? "텍스트 붙여넣기" : "파일 업로드"}
+            {m === "paste" ? "직접 입력할게요" : "파일 업로드"}
           </button>
         ))}
       </div>
@@ -182,7 +182,7 @@ function AddDocument({ onAdded }: { onAdded: () => void }) {
         disabled={busy}
         className="mt-4 rounded-lg bg-brand px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
       >
-        {busy ? "등록 중…" : "등록"}
+        {busy ? "등록 중…" : "등록하기"}
       </button>
     </form>
   );
