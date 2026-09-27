@@ -3,6 +3,7 @@ import { IBM_Plex_Sans_KR, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "./components/AuthProvider";
 import Shell from "./components/Shell";
+import Providers from "./providers";
 
 // UI·한글 본문. 엔지니어링된 지오메트릭 산세 — 시스템 폰트 탈출.
 const sans = IBM_Plex_Sans_KR({
@@ -33,9 +34,11 @@ export default function RootLayout({
   return (
     <html lang="ko" className={`${sans.variable} ${mono.variable}`}>
       <body>
-        <AuthProvider>
-          <Shell>{children}</Shell>
-        </AuthProvider>
+        <Providers>
+          <AuthProvider>
+            <Shell>{children}</Shell>
+          </AuthProvider>
+        </Providers>
       </body>
     </html>
   );

@@ -1,25 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import PageHeader from "../components/PageHeader";
-
-// 6단계 코드 스플리팅: Markdown 렌더러를 별도 청크로 지연 로드(초기 번들 축소).
-const Markdown = dynamic(() => import("../components/Markdown"), { ssr: false });
+import {
+  createConversation,
+  deleteConversation,
+  getConversation,
+  listConversations,
+  saveConversation,
+  type Msg,
+} from "../lib/conversations";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-// 대화·모델을 세션 동안 유지(탭 이동에도 보존, 탭 닫으면 초기화).
-const STORAGE_KEY = "erp_chat";
+// 6단계 코드 스플리팅: Markdown 렌더러를 별도 청크로 지연 로드.
+const Markdown = dynamic(() => import("../components/Markdown"), { ssr: false });
 
-type Role = "user" | "assistant";
-interface Msg {
-  role: Role;
-  content: string;
-  tools?: string[]; // 이 답변을 만들며 호출한 도구 이름들
-}
-
-// 도구 → '출처 카테고리'(무엇을 근거로 답했나). 색으로 구분해 할루시네이션 오해를 없앤다.
+// 도구 → '출처 카테고리'. 색으로 구분해 근거를 명확히.
 const SOURCE: Record<string, { label: string; cls: string }> = {
   web_search: { label: "🌐 웹 검색", cls: "border-freight text-freight bg-freight-tint" },
   search_documents: { label: "📄 사내 문서", cls: "border-brand text-brand-strong bg-brand-tint" },
@@ -30,7 +31,6 @@ const SOURCE: Record<string, { label: string; cls: string }> = {
   list_partners: { label: "📊 ERP 데이터", cls: "border-ink-2 text-ink bg-surface-2" },
 };
 
-// 답변의 도구 목록 → 중복 없는 출처 배지 목록.
 function sourceBadges(tools: string[] | undefined): { label: string; cls: string }[] {
   const seen = new Set<string>();
   const out: { label: string; cls: string }[] = [];
@@ -51,52 +51,130 @@ const SUGGESTIONS = [
   "확정된 발주 주문 보여줘",
 ];
 
-export default function ChatPage() {
-  const [model, setModel] = useState<"claude" | "local">("claude");
+// 5단계 Reconnect: 네트워크 오류 시 1회 재연결(중단은 그대로 전파).
+async function fetchWithReconnect(
+  url: string,
+  opts: RequestInit,
+  onRetry?: () => void
+): Promise<Response> {
+  try {
+    return await fetch(url, opts);
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    onRetry?.();
+    await new Promise((r) => setTimeout(r, 800));
+    return await fetch(url, opts);
+  }
+}
+
+function ChatInner() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const qc = useQueryClient();
+  const cid = params.get("c");
+
+  // 2단계: 대화 목록은 TanStack Query로 캐시·무효화.
+  const { data: conversations = [] } = useQuery({
+    queryKey: ["conversations"],
+    queryFn: listConversations,
+  });
+
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [model, setModel] = useState<"claude" | "local">("claude");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const messagesRef = useRef<Msg[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null); // 생성 중단(Stop)용
-  const firstPersist = useRef(true); // 마운트 시 빈 상태로 저장본을 덮어쓰지 않도록
+  const stick = useRef(true); // 하단 고정(자동 스크롤) 여부
 
-  // 복원: 마운트 후 sessionStorage에서 대화·모델을 읽는다(SSR 하이드레이션 충돌 방지).
+  const setMsgs = (updater: Msg[] | ((p: Msg[]) => Msg[])) =>
+    setMessages((prev) => {
+      const next = typeof updater === "function" ? (updater as (p: Msg[]) => Msg[])(prev) : updater;
+      messagesRef.current = next;
+      return next;
+    });
+
+  // URL에 대화 id가 없으면 최근 대화(또는 새 대화)로 이동해 항상 딥링크 가능.
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (Array.isArray(saved.messages)) setMessages(saved.messages);
-      if (saved.model === "claude" || saved.model === "local") setModel(saved.model);
-    } catch {
-      /* 저장본 손상 시 무시하고 빈 대화로 시작 */
-    }
-  }, []);
+    if (cid) return;
+    const list = listConversations();
+    const target = list[0]?.id ?? createConversation().id;
+    qc.invalidateQueries({ queryKey: ["conversations"] });
+    router.replace(`/chat?c=${target}`);
+  }, [cid, router, qc]);
 
-  // 저장: 대화·모델이 바뀔 때마다 반영. 첫 실행(마운트)은 건너뛴다.
+  // 현재 대화 로드(스트리밍 중이 아닐 때만 덮어씀).
   useEffect(() => {
-    if (firstPersist.current) {
-      firstPersist.current = false;
-      return;
-    }
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ messages, model }));
-    } catch {
-      /* 용량 초과 등은 무시 */
-    }
-  }, [messages, model]);
+    if (!cid) return;
+    const conv = getConversation(cid);
+    const msgs = conv?.messages ?? [];
+    messagesRef.current = msgs;
+    setMessages(msgs);
+    setModel(conv?.model ?? "claude");
+    stick.current = true;
+    requestAnimationFrame(scrollToBottom);
+  }, [cid]);
 
-  const clearChat = () => {
-    if (busy) return;
-    setMessages([]);
-    try {
-      sessionStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
+  const persist = (msgs: Msg[], mdl = model) => {
+    if (!cid) return;
+    saveConversation(cid, { messages: msgs, model: mdl });
+    qc.invalidateQueries({ queryKey: ["conversations"] });
   };
 
-  // 슬랙 전송 — 부작용이라 반드시 사용자 확인 후에만.
+  // 6단계: 메시지 리스트 가상화(가변 높이, 동적 측정).
+  const rowVirtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 96,
+    overscan: 8,
+    measureElement: (el) => el.getBoundingClientRect().height,
+  });
+
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+
+  // 스트리밍 중 하단 고정: 사용자가 위로 스크롤하면 고정 해제.
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
+
+  useEffect(() => {
+    if (stick.current) requestAnimationFrame(scrollToBottom);
+  }, [messages]);
+
+  const clearCurrent = () => {
+    if (busy || !cid) return;
+    setMsgs([]);
+    persist([]);
+  };
+
+  const newChat = () => {
+    if (busy) return;
+    const conv = createConversation(model);
+    qc.invalidateQueries({ queryKey: ["conversations"] });
+    setMenuOpen(false);
+    router.push(`/chat?c=${conv.id}`);
+  };
+
+  const selectChat = (id: string) => {
+    if (busy) return;
+    setMenuOpen(false);
+    router.push(`/chat?c=${id}`);
+  };
+
+  const removeChat = (id: string) => {
+    if (busy) return;
+    deleteConversation(id);
+    qc.invalidateQueries({ queryKey: ["conversations"] });
+    if (id === cid) router.replace("/chat");
+  };
+
   const sendToSlack = async (text: string) => {
     if (!text.trim() || text.startsWith("⚠️")) return;
     if (!window.confirm(`이 내용을 슬랙으로 보낼까요?\n\n${text.slice(0, 300)}`)) return;
@@ -119,19 +197,12 @@ export default function ChatPage() {
     }
   };
 
-  const scrollDown = () =>
-    requestAnimationFrame(() =>
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-    );
-
-  // 생성 중단 — 진행 중인 요청을 취소한다(부분 응답은 그대로 남긴다).
   const stop = () => abortRef.current?.abort();
 
-  // 5단계: 실패한 답변을 지우고 마지막 사용자 질문으로 다시 시도한다.
   const retry = () => {
     if (busy) return;
     let end = messages.length;
-    while (end > 0 && messages[end - 1].role === "assistant") end--; // 실패/부분 assistant 제거
+    while (end > 0 && messages[end - 1].role === "assistant") end--;
     const history = messages.slice(0, end);
     if (history.length === 0) return;
     runStream(history);
@@ -143,32 +214,36 @@ export default function ChatPage() {
     runStream([...messages, { role: "user", content: text }]);
   };
 
-  // 주어진 대화 이력으로 assistant 답변을 스트리밍한다(send·retry 공용).
   const runStream = async (history: Msg[]) => {
-    setMessages([...history, { role: "assistant", content: "", tools: [] }]);
+    setMsgs([...history, { role: "assistant", content: "", tools: [] }]);
     setBusy(true);
-    scrollDown();
+    stick.current = true;
+    requestAnimationFrame(scrollToBottom);
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     const patchLast = (fn: (m: Msg) => Msg) =>
-      setMessages((prev) => {
+      setMsgs((prev) => {
         const copy = [...prev];
         copy[copy.length - 1] = fn(copy[copy.length - 1]);
         return copy;
       });
 
     try {
-      const res = await fetch(`${BASE}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: history.map((m) => ({ role: m.role, content: m.content })),
-        }),
-        signal: controller.signal,
-      });
+      const res = await fetchWithReconnect(
+        `${BASE}/chat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            messages: history.map((m) => ({ role: m.role, content: m.content })),
+          }),
+          signal: controller.signal,
+        },
+        () => patchLast((m) => ({ ...m, content: m.content })) // 재연결 시도(조용히 1회)
+      );
       if (!res.ok || !res.body) throw new Error(`서버 오류 (${res.status})`);
 
       const reader = res.body.getReader();
@@ -185,20 +260,15 @@ export default function ChatPage() {
           if (!line.startsWith("data:")) continue;
           const evt = JSON.parse(line.slice(5).trim());
           if (evt.type === "tool") {
-            patchLast((m) => ({
-              ...m,
-              tools: [...(m.tools ?? []), evt.name], // 원본 도구명 저장 → 렌더 시 출처 배지로 변환
-            }));
+            patchLast((m) => ({ ...m, tools: [...(m.tools ?? []), evt.name] }));
           } else if (evt.type === "text") {
             patchLast((m) => ({ ...m, content: m.content + evt.content }));
           } else if (evt.type === "error") {
             patchLast((m) => ({ ...m, content: `⚠️ ${evt.content}` }));
           }
-          scrollDown();
         }
       }
     } catch (e) {
-      // Stop으로 취소된 경우: 에러가 아니라 '중단'이므로 부분 응답을 유지한다.
       if ((e as Error).name === "AbortError") {
         patchLast((m) => ({ ...m, content: m.content || "(중단됨)" }));
       } else {
@@ -207,9 +277,81 @@ export default function ChatPage() {
     } finally {
       abortRef.current = null;
       setBusy(false);
-      scrollDown();
+      persist(messagesRef.current); // 2단계: 완료 후 현재 대화에 저장
+      requestAnimationFrame(scrollToBottom);
     }
   };
+
+  const current = conversations.find((c) => c.id === cid);
+
+  const renderBubble = (m: Msg, i: number) => (
+    <div className={`flex ${m.role === "user" ? "justify-end" : "justify-start"} py-2`}>
+      <div
+        className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+          m.role === "user"
+            ? "rounded-br-sm bg-brand text-white"
+            : "rounded-bl-sm border border-line bg-surface-2 text-ink"
+        }`}
+      >
+        {m.role === "assistant" && (m.content || (m.tools && m.tools.length > 0)) && (
+          <div className="mb-2 flex flex-wrap items-center gap-1">
+            <span className="mr-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-3">근거</span>
+            {sourceBadges(m.tools).map((s, j) => (
+              <span key={j} className={`rounded-full border px-2 py-0.5 font-mono text-[11px] ${s.cls}`}>
+                {s.label}
+              </span>
+            ))}
+            {(!m.tools || m.tools.length === 0) &&
+              m.content &&
+              !m.content.startsWith("⚠️") &&
+              !m.content.includes("찾을 수 없습니다") && (
+                <span className="rounded-full border border-danger/40 bg-danger-tint px-2 py-0.5 font-mono text-[11px] text-danger">
+                  🧠 모델 지식(근거 없음)
+                </span>
+              )}
+          </div>
+        )}
+        {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") ? (
+          <Markdown text={m.content} />
+        ) : m.content ? (
+          <span className="whitespace-pre-wrap">{m.content}</span>
+        ) : m.role === "assistant" && busy && i === messages.length - 1 ? (
+          m.tools && m.tools.length > 0 ? (
+            <span className="inline-flex items-center gap-2 text-[13px] text-ink-2">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-line border-t-brand" />
+              🔧 {sourceBadges(m.tools).map((s) => s.label).join(" · ")} 실행 중…
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-ink-3">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3" />
+            </span>
+          )
+        ) : null}
+        {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") && (
+          <div className="mt-2 border-t border-line pt-2">
+            <button
+              onClick={() => sendToSlack(m.content)}
+              className="rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-2 transition-colors hover:border-brand hover:text-brand"
+            >
+              ↗ 슬랙으로 보내기
+            </button>
+          </div>
+        )}
+        {m.role === "assistant" && m.content.startsWith("⚠️") && !busy && i === messages.length - 1 && (
+          <div className="mt-2 border-t border-danger/20 pt-2">
+            <button
+              onClick={retry}
+              className="rounded-md border border-danger/40 bg-danger-tint px-2 py-1 font-mono text-[11px] text-danger transition-colors hover:bg-danger/10"
+            >
+              ↺ 다시 시도
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex h-[calc(100vh-4.5rem)] flex-col">
@@ -219,27 +361,74 @@ export default function ChatPage() {
         desc="재고·주문·정산을 물어보면 실제 데이터를 조회해 답합니다. (조회 전용)"
         meta={
           <div className="flex items-center gap-2">
+            {/* 2단계: 대화 목록 스위처 */}
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                disabled={busy}
+                className="flex max-w-[180px] items-center gap-1 rounded-md border border-line bg-surface px-3 py-1.5 text-sm text-ink-2 transition-colors hover:border-brand hover:text-brand disabled:opacity-50"
+              >
+                <span className="truncate">{current?.title ?? "대화"}</span>
+                <span className="text-ink-3">▾</span>
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 z-20 mt-1 max-h-80 w-72 overflow-y-auto rounded-lg border border-line bg-surface p-1 shadow-lg">
+                  <button
+                    onClick={newChat}
+                    className="mb-1 w-full rounded-md px-3 py-2 text-left text-sm text-brand hover:bg-brand-tint"
+                  >
+                    ＋ 새 대화
+                  </button>
+                  {conversations.length === 0 && (
+                    <p className="px-3 py-2 text-xs text-ink-3">대화가 없습니다.</p>
+                  )}
+                  {conversations.map((c) => (
+                    <div
+                      key={c.id}
+                      className={`group flex items-center gap-1 rounded-md px-2 ${
+                        c.id === cid ? "bg-surface-2" : "hover:bg-surface-2"
+                      }`}
+                    >
+                      <button
+                        onClick={() => selectChat(c.id)}
+                        className="flex-1 truncate py-2 text-left text-sm text-ink"
+                      >
+                        {c.title}
+                      </button>
+                      <button
+                        onClick={() => removeChat(c.id)}
+                        className="px-1 text-ink-3 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                        title="삭제"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             {messages.length > 0 && (
               <button
-                onClick={clearChat}
+                onClick={clearCurrent}
                 disabled={busy}
                 className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm text-ink-2 transition-colors hover:border-brand hover:text-brand disabled:opacity-50"
               >
-                새 대화
+                비우기
               </button>
             )}
             <div className="inline-flex overflow-hidden rounded-md border border-line text-sm">
-              {(["claude", "local"] as const).map((m) => (
+              {(["claude", "local"] as const).map((mm) => (
                 <button
-                  key={m}
-                  onClick={() => setModel(m)}
+                  key={mm}
+                  onClick={() => {
+                    setModel(mm);
+                    persist(messagesRef.current, mm);
+                  }}
                   className={`px-4 py-1.5 transition-colors ${
-                    model === m
-                      ? "bg-brand text-white"
-                      : "bg-surface text-ink-2 hover:text-ink"
+                    model === mm ? "bg-brand text-white" : "bg-surface text-ink-2 hover:text-ink"
                   }`}
                 >
-                  {m === "claude" ? "Claude" : "로컬 LLM"}
+                  {mm === "claude" ? "Claude" : "로컬 LLM"}
                 </button>
               ))}
             </div>
@@ -247,12 +436,13 @@ export default function ChatPage() {
         }
       />
 
-      {/* 메시지 영역 */}
+      {/* 메시지 영역 (가상화) */}
       <div
         ref={scrollRef}
-        className="flex-1 space-y-4 overflow-y-auto rounded-card border border-line bg-surface p-5"
+        onScroll={onScroll}
+        className="flex-1 overflow-y-auto rounded-card border border-line bg-surface p-5"
       >
-        {messages.length === 0 && (
+        {messages.length === 0 ? (
           <div>
             <p className="eyebrow mb-3">예시 질문</p>
             <div className="flex flex-wrap gap-2">
@@ -267,90 +457,26 @@ export default function ChatPage() {
               ))}
             </div>
           </div>
-        )}
-
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`flex ${
-              m.role === "user" ? "justify-end" : "justify-start"
-            }`}
-          >
-            <div
-              className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                m.role === "user"
-                  ? "rounded-br-sm bg-brand text-white"
-                  : "rounded-bl-sm border border-line bg-surface-2 text-ink"
-              }`}
-            >
-              {m.role === "assistant" && (m.content || (m.tools && m.tools.length > 0)) && (
-                <div className="mb-2 flex flex-wrap items-center gap-1">
-                  <span className="mr-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-3">근거</span>
-                  {sourceBadges(m.tools).map((s, j) => (
-                    <span
-                      key={j}
-                      className={`rounded-full border px-2 py-0.5 font-mono text-[11px] ${s.cls}`}
-                    >
-                      {s.label}
-                    </span>
-                  ))}
-                  {/* 도구를 하나도 안 쓰고 답한 경우(=모델 자체 지식) 경고 */}
-                  {(!m.tools || m.tools.length === 0) &&
-                    m.content &&
-                    !m.content.startsWith("⚠️") &&
-                    !m.content.includes("찾을 수 없습니다") && (
-                      <span className="rounded-full border border-danger/40 bg-danger-tint px-2 py-0.5 font-mono text-[11px] text-danger">
-                        🧠 모델 지식(근거 없음)
-                      </span>
-                    )}
-                </div>
-              )}
-              {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") ? (
-                <Markdown text={m.content} />
-              ) : m.content ? (
-                <span className="whitespace-pre-wrap">{m.content}</span>
-              ) : m.role === "assistant" && busy ? (
-                // 4단계 Tool 상태 UI: 도구가 돌고 있으면 어떤 도구를 실행 중인지 보여준다.
-                m.tools && m.tools.length > 0 ? (
-                  <span className="inline-flex items-center gap-2 text-[13px] text-ink-2">
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-line border-t-brand" />
-                    🔧 {sourceBadges(m.tools).map((s) => s.label).join(" · ")} 실행 중…
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-ink-3">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.3s]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.15s]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3" />
-                  </span>
-                )
-              ) : null}
-              {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") && (
-                <div className="mt-2 border-t border-line pt-2">
-                  <button
-                    onClick={() => sendToSlack(m.content)}
-                    className="rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-2 transition-colors hover:border-brand hover:text-brand"
-                  >
-                    ↗ 슬랙으로 보내기
-                  </button>
-                </div>
-              )}
-              {/* 5단계 에러 복구: 실패한 마지막 답변에 재시도 버튼 */}
-              {m.role === "assistant" &&
-                m.content.startsWith("⚠️") &&
-                !busy &&
-                i === messages.length - 1 && (
-                  <div className="mt-2 border-t border-danger/20 pt-2">
-                    <button
-                      onClick={retry}
-                      className="rounded-md border border-danger/40 bg-danger-tint px-2 py-1 font-mono text-[11px] text-danger transition-colors hover:bg-danger/10"
-                    >
-                      ↺ 다시 시도
-                    </button>
-                  </div>
-                )}
-            </div>
+        ) : (
+          <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative", width: "100%" }}>
+            {rowVirtualizer.getVirtualItems().map((vi) => (
+              <div
+                key={vi.key}
+                data-index={vi.index}
+                ref={rowVirtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${vi.start}px)`,
+                }}
+              >
+                {renderBubble(messages[vi.index], vi.index)}
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
 
       {/* 입력 */}
@@ -388,5 +514,13 @@ export default function ChatPage() {
         )}
       </form>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={<div className="p-5 text-sm text-ink-3">불러오는 중…</div>}>
+      <ChatInner />
+    </Suspense>
   );
 }
