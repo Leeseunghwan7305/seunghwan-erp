@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import PageHeader from "../components/PageHeader";
-import Markdown from "../components/Markdown";
+
+// 6단계 코드 스플리팅: Markdown 렌더러를 별도 청크로 지연 로드(초기 번들 축소).
+const Markdown = dynamic(() => import("../components/Markdown"), { ssr: false });
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -124,11 +127,25 @@ export default function ChatPage() {
   // 생성 중단 — 진행 중인 요청을 취소한다(부분 응답은 그대로 남긴다).
   const stop = () => abortRef.current?.abort();
 
-  const send = async (text: string) => {
+  // 5단계: 실패한 답변을 지우고 마지막 사용자 질문으로 다시 시도한다.
+  const retry = () => {
+    if (busy) return;
+    let end = messages.length;
+    while (end > 0 && messages[end - 1].role === "assistant") end--; // 실패/부분 assistant 제거
+    const history = messages.slice(0, end);
+    if (history.length === 0) return;
+    runStream(history);
+  };
+
+  const send = (text: string) => {
     if (!text.trim() || busy) return;
-    const history: Msg[] = [...messages, { role: "user", content: text }];
-    setMessages([...history, { role: "assistant", content: "", tools: [] }]);
     setInput("");
+    runStream([...messages, { role: "user", content: text }]);
+  };
+
+  // 주어진 대화 이력으로 assistant 답변을 스트리밍한다(send·retry 공용).
+  const runStream = async (history: Msg[]) => {
+    setMessages([...history, { role: "assistant", content: "", tools: [] }]);
     setBusy(true);
     scrollDown();
 
@@ -293,11 +310,19 @@ export default function ChatPage() {
               ) : m.content ? (
                 <span className="whitespace-pre-wrap">{m.content}</span>
               ) : m.role === "assistant" && busy ? (
-                <span className="inline-flex items-center gap-1 text-ink-3">
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.3s]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.15s]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3" />
-                </span>
+                // 4단계 Tool 상태 UI: 도구가 돌고 있으면 어떤 도구를 실행 중인지 보여준다.
+                m.tools && m.tools.length > 0 ? (
+                  <span className="inline-flex items-center gap-2 text-[13px] text-ink-2">
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-line border-t-brand" />
+                    🔧 {sourceBadges(m.tools).map((s) => s.label).join(" · ")} 실행 중…
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-ink-3">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.3s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.15s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3" />
+                  </span>
+                )
               ) : null}
               {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") && (
                 <div className="mt-2 border-t border-line pt-2">
@@ -309,6 +334,20 @@ export default function ChatPage() {
                   </button>
                 </div>
               )}
+              {/* 5단계 에러 복구: 실패한 마지막 답변에 재시도 버튼 */}
+              {m.role === "assistant" &&
+                m.content.startsWith("⚠️") &&
+                !busy &&
+                i === messages.length - 1 && (
+                  <div className="mt-2 border-t border-danger/20 pt-2">
+                    <button
+                      onClick={retry}
+                      className="rounded-md border border-danger/40 bg-danger-tint px-2 py-1 font-mono text-[11px] text-danger transition-colors hover:bg-danger/10"
+                    >
+                      ↺ 다시 시도
+                    </button>
+                  </div>
+                )}
             </div>
           </div>
         ))}
