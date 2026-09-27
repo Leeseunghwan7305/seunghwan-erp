@@ -24,3 +24,9 @@ yarn-error.log*
 
 # Playwright MCP 세션 산출물(스냅샷·콘솔로그·스크린샷)
 .playwright-mcp/
+
+# Playwright E2E
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/blob-report/
+/frontend/.playwright-mcp/
