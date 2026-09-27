@@ -12,6 +12,7 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 - **인사** — 직원·근태
 - **대시보드** — 매출·매입·재고·정산 요약 지표
 - **AI 에이전트 ‘원장(元帳)’** — 정체성 + 5단계 리즈닝(의도 분류 → 근거 계획 → 도구 실행 → 자기 점검 → 답변)을 갖춘 RAG 에이전트. **실시간 수치는 도구 / 사내 규정은 문서 / 외부 정보는 웹**으로 스스로 근거 경로를 판단 (Claude API · 로컬 Ollama 모델 라우팅)
+- **실시간 스트리밍 채팅 UX** — 토큰 단위 스트리밍·생성 중 중지(AbortController)·점진적 Markdown 렌더·도구 실행 상태 표시·**멀티 대화(URL 딥링크 `?c=`)**·메시지 가상화·재시도/자동 재연결. Playwright E2E로 회귀 검증 (자세히는 [채팅 프론트엔드](#채팅-프론트엔드-스트리밍-ux) 참고)
 - **RAG 지식 문서 관리** — 문서(PDF·MD·텍스트) 업로드 → 임베딩(`bge-m3`) 색인 → 검색. 챗봇이 사내 규정·매뉴얼을 **근거(출처)와 함께** 답변. 관리 페이지에서 업로드·색인 상태·검색 품질 테스트·삭제까지 제공
 - **근거 라우팅 & 할루시네이션 제어** — 검색·도구 결과를 근거로 자동 주입하고, 근거가 없으면 코드 레벨에서 답변 차단(`RAG_STRICT`). 임베딩 유사도 분포를 측정해 자동주입 임계값을 **0.50**(잡음/신호 사이)으로 캘리브레이션
 - **출처 배지(Provenance)** — 답변마다 근거 출처(🌐 웹 검색 / 📄 사내 문서 / 📊 ERP 데이터 / 🧠 근거 없음)를 표시해 오해를 제거
@@ -70,8 +71,9 @@ web (Next.js :3000)  ──REST·SSE──▶  api (FastAPI :8000)  ──psycop
 | 영역 | 스택 |
 |------|------|
 | 백엔드 | Python 3.12 · FastAPI 0.115 · Uvicorn · SQLModel 0.0.22 · Alembic 1.14 · psycopg2 |
-| 프론트엔드 | TypeScript 5.6 · Next.js 14.2 · React 18.3 · Tailwind CSS 3.4 |
+| 프론트엔드 | TypeScript 5.6 · Next.js 14.2 · React 18.3 · Tailwind CSS 3.4 · TanStack Query 5 · TanStack Virtual 3 |
 | AI | anthropic SDK · httpx · Ollama(로컬 LLM) · `bge-m3` 임베딩(RAG) · `ddgs`(웹 검색) |
+| 테스트 | Playwright(E2E) |
 | 인프라 | PostgreSQL 16 · Docker Compose |
 
 ## 빠른 시작
@@ -118,8 +120,37 @@ DB 데이터를 완전히 초기화하려면 `docker compose down -v`로 볼륨�
 
 - **로컬 실행:** 호스트에서 `ollama serve` + `ollama pull qwen2.5:7b` + `ollama pull bge-m3`(임베딩). 컨테이너에서 호스트 Ollama를 쓰려면 `OLLAMA_BASE_URL=http://host.docker.internal:11434`로 지정.
 - **에이전트 정체성·리즈닝:** 두 경로 모두 `AGENT_IDENTITY` / `REASONING_FRAMEWORK` / `AGENT_RULES` 공유 상수를 사용해 동일한 ‘원장’ 에이전트로 동작합니다.
-- **도구:** ERP 조회(`get_dashboard`, `get_inventory`, `list_orders`, `list_partners`) · 문서 검색(`search_documents`) · 웹 검색(`web_search`). 하나의 도구 정의를 Claude·Ollama 규격으로 변환해 재사용하고, 모든 호출은 감사 로그에 기록됩니다. 응답은 SSE 스트리밍이며 최대 6회까지 도구 호출을 반복합니다.
+- **도구:** ERP 조회(`get_dashboard`, `get_inventory`, `list_orders`, `list_partners`) · 문서 검색(`search_documents`) · 웹 검색(`web_search`). 하나의 도구 정의를 Claude·Ollama 규격으로 변환해 재사용하고, 모든 호출은 감사 로그에 기록됩니다. 최대 6회까지 도구 호출(ReAct)을 반복합니다.
+- **스트리밍:** 로컬(Ollama)은 `stream:true`로 **토큰 단위 실시간 전송**, 그 외 경로는 완성 답변을 조각내어 점진적으로 전송(SSE). 근거(문서·도구)가 확보된 경우에만 델타를 실시간으로 흘려 grounding 가드와 공존합니다.
 - **쓰기(실행) 경로:** 데이터 변경은 챗봇이 직접 실행하지 않고 `/agent/plan` → 사용자 확인 → `/agent/apply`(human-in-the-loop)로 분리됩니다.
+
+## 채팅 프론트엔드 (스트리밍 UX)
+
+AI 어시스턴트 화면(`/chat`)은 7단계로 설계·구현했습니다.
+
+| 단계 | 내용 | 핵심 구현 |
+|------|------|-----------|
+| 1 | SSE 스트리밍 + 중지 | `fetch` ReadableStream 파싱 · `AbortController`로 중지(부분 응답 유지) |
+| 2 | 멀티 대화 + URL 상태 + Query | `localStorage` 대화 저장 · `?c=<id>` 딥링크 · TanStack Query로 목록 캐시·무효화 · 자동 제목/삭제/복원 |
+| 3 | RAG + 출처 표시 | 답변이 실제 쓴 근거만 출처 배지로(🌐/📄/📊) |
+| 4 | Tool 상태 UI | 도구 실행 중 “🔧 <도구> 실행 중…” 스피너 |
+| 5 | 재시도 + 재연결 | 에러 답변 “↺ 다시 시도” · `fetchWithReconnect` 1회 자동 재연결 |
+| 6 | 성능 | Markdown `next/dynamic` 코드 스플리팅 · `@tanstack/react-virtual` 메시지 가상화 |
+| 7 | E2E | Playwright 회귀 테스트 |
+
+관련 코드: `frontend/app/chat/page.tsx`, `frontend/app/components/Markdown.tsx`(의존성 없는 경량 렌더러), `frontend/app/lib/conversations.ts`, `frontend/app/providers.tsx`(QueryClient).
+
+## 테스트 (E2E)
+
+```bash
+cd frontend
+npx playwright install chromium   # 최초 1회
+npx playwright test               # 백엔드·Ollama·프론트가 실행 중이어야 함
+```
+
+- `frontend/e2e/chat.spec.ts` — 스트리밍 → 근거 배지 → 본문 렌더 플로우 검증(로컬 `qwen2.5:7b` 기준, **통과**).
+- 로그인 게이트는 `addInitScript`로 `ai` 권한 사용자를 주입해 통과합니다.
+- 중지(stop) 테스트는 grounding 답변이 ~3초로 매우 빨라 자동화가 불안정 → 사유 명시 후 `skip`(기능 자체는 구현·수동검증 완료).
 
 ## 주요 API
 
@@ -172,14 +203,20 @@ seunghwan-erp/
 └── frontend/
     ├── Dockerfile
     ├── package.json
-    └── app/                    # App Router: 도메인별 page + components(HelpDrawer·CrudManager·AuthProvider) + lib/api.ts
+    ├── playwright.config.ts    # E2E 설정
+    ├── e2e/                    # Playwright 테스트(chat.spec.ts)
+    └── app/
+        ├── providers.tsx       # TanStack Query 프로바이더
+        ├── chat/page.tsx       # 스트리밍 채팅(멀티대화·가상화·중지·재시도)
+        ├── components/         # HelpDrawer · CrudManager · AuthProvider · Markdown(경량 렌더러)
+        └── lib/                # api.ts · conversations.ts(대화 저장) · permissions.ts
 ```
 
 ## 프로토타입 범위
 
-- **포함:** 핵심 업무 흐름(구매→재고→판매→정산), 화면·데이터 구조 검증, RAG 에이전트(도구·문서·웹 라우팅) · RAG 지식 검색·관리 · 화면 도우미 · 실행(쓰기) 에이전트 · 외부 알림·감사 로그 · 권한 관리(UI 레벨)
-- **제외:** API 레벨 인증(현재 접근제어는 UI 레벨), 평가(eval) 하네스, 세금계산서 발행, 실 결제, 성능 최적화
-- **다음 단계:** “질문→기대출처” 골든셋 기반 eval, 문서 주제별 분리·리랭커로 검색 품질 개선, 다단계(멀티스텝) 에이전틱 워크플로
+- **포함:** 핵심 업무 흐름(구매→재고→판매→정산), 화면·데이터 구조 검증, RAG 에이전트(도구·문서·웹 라우팅) · 실시간 스트리밍 채팅 UX(멀티대화·가상화·중지·재시도) · RAG 지식 검색·관리 · 화면 도우미 · 실행(쓰기) 에이전트 · 외부 알림·감사 로그 · 권한 관리(UI 레벨) · E2E 테스트
+- **제외:** API 레벨 인증(현재 접근제어는 UI 레벨), 평가(eval) 하네스, 세금계산서 발행, 실 결제
+- **다음 단계:** “질문→기대출처” 골든셋 기반 eval, 문서 주제별 분리·리랭커로 검색 품질 개선, 다단계(멀티스텝) 에이전틱 워크플로, 스트림 중간 끊김 재개(resume)
 
 자세한 기획은 [`erp-prototype-plan.html`](./erp-prototype-plan.html), AI 챗봇 설계는 [`docs/ai-chatbot-plan.md`](./docs/ai-chatbot-plan.md) 참고.
 
@@ -188,4 +225,4 @@ seunghwan-erp/
 - 코드 변경은 볼륨 마운트 + hot reload로 즉시 반영됩니다(재빌드 불필요).
 - 스키마는 프로토타입에선 `SQLModel.metadata.create_all`로 생성합니다. 운영 전환 시 Alembic 마이그레이션으로 전환하세요.
 - CORS는 프로토타입 편의상 모든 오리진을 허용합니다. 운영 시 반드시 제한하세요.
-# seunghwan-erp
+- 프론트엔드 E2E는 `frontend/`에서 `npx playwright test`로 실행합니다(백엔드·Ollama 필요).
