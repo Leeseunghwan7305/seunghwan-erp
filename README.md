@@ -165,6 +165,30 @@ cd backend && ../.venv/bin/python eval/run_eval.py   # DB + Ollama 필요
 - 답변 텍스트가 아니라 **에이전트가 어떤 근거로 답했는지(라우팅)** 를 채점해, 모델이 흔들려도 회귀(예: 웹 질문에 사내 문서가 딸려오는 근거 오염)를 안정적으로 잡습니다.
 - 임계값·프롬프트를 바꿀 때마다 돌려 회귀를 확인 — 종료코드로 CI 연결 가능. **현재 10/10 통과(라우팅 100%).**
 
+## MCP 서버 — ERP를 외부 에이전트에 노출
+
+ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Desktop 같은 **외부 MCP 클라이언트**가 이 서버에 연결하면, 챗봇이 쓰는 것과 **동일한 도구**(현황·재고·주문·거래처·문서검색)를 그대로 호출할 수 있습니다.
+
+```bash
+.venv/bin/python backend/mcp_server.py   # stdio 트랜스포트
+```
+
+- `backend/mcp_server.py` — 내부적으로 `app.chat.tools.execute_tool`을 재사용해 **로직 중복 0**. 모든 호출은 감사 로그에 `actor="mcp"`로 기록됩니다(읽기 전용).
+- **Claude Desktop 등록**(`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "seunghwan-erp": {
+      "command": "/절대경로/seunghwan-erp/.venv/bin/python",
+      "args": ["/절대경로/seunghwan-erp/backend/mcp_server.py"]
+    }
+  }
+}
+```
+
+> 노출 도구: `get_dashboard` · `get_inventory` · `list_orders` · `list_partners` · `search_documents`. 프로토콜 레벨(stdio 클라이언트 → initialize → list/call)로 동작 검증됨.
+
 ## 주요 API
 
 | 메서드 | 경로 | 설명 |
