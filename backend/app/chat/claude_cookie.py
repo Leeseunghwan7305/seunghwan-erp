@@ -286,6 +286,7 @@ def run_claude_cookie(messages: list[dict]) -> Iterator[dict]:
                 used_tool = True
                 yield {"type": "tool", "name": call["name"], "input": call["input"]}
                 result = execute_tool(call["name"], call["input"])
+                yield {"type": "tool_result", "name": call["name"], "data": result}  # Generative UI
                 time.sleep(_INTER_ROUND_DELAY)  # 연속 completion 버스트 완화(429 예방)
                 prompt = (
                     f"도구 {call['name']} 결과(JSON):\n"

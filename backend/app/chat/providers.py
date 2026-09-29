@@ -215,6 +215,7 @@ def run_claude(messages: list[dict], model: str | None = None, doc_min_score: fl
         for tu in tool_uses:
             yield {"type": "tool", "name": tu.name, "input": tu.input}
             result = execute_tool(tu.name, tu.input)
+            yield {"type": "tool_result", "name": tu.name, "data": result}  # Generative UI용 원자료
             results.append({
                 "type": "tool_result",
                 "tool_use_id": tu.id,
@@ -349,6 +350,7 @@ def run_local(messages: list[dict], model: str | None = None, doc_min_score: flo
                     args = {}
             yield {"type": "tool", "name": name, "input": args}
             result = execute_tool(name, args)
+            yield {"type": "tool_result", "name": name, "data": result}  # Generative UI용 원자료
             conv.append({"role": "tool", "content": json.dumps(result, ensure_ascii=False)})
 
     yield {"type": "error", "content": "도구 호출 한도를 초과했습니다."}

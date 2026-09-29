@@ -19,6 +19,8 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // 6단계 코드 스플리팅: Markdown 렌더러를 별도 청크로 지연 로드.
 const Markdown = dynamic(() => import("../components/Markdown"), { ssr: false });
+// Generative UI: 도구 결과를 표·카드로 렌더(지연 로드).
+const ToolResultView = dynamic(() => import("../components/ToolResultView"), { ssr: false });
 
 // 도구 → '출처 카테고리'. 색으로 구분해 근거를 명확히.
 const SOURCE: Record<string, { label: string; cls: string }> = {
@@ -310,6 +312,11 @@ function ChatInner() {
           const evt = JSON.parse(line.slice(5).trim());
           if (evt.type === "tool") {
             patchLast((m) => ({ ...m, tools: [...(m.tools ?? []), evt.name] }));
+          } else if (evt.type === "tool_result") {
+            patchLast((m) => ({
+              ...m,
+              results: [...(m.results ?? []), { name: evt.name, data: evt.data }],
+            }));
           } else if (evt.type === "text") {
             patchLast((m) => ({ ...m, content: m.content + evt.content }));
           } else if (evt.type === "error") {
@@ -358,6 +365,13 @@ function ChatInner() {
                   🧠 모델 지식(근거 없음)
                 </span>
               )}
+          </div>
+        )}
+        {m.role === "assistant" && m.results && m.results.length > 0 && (
+          <div className="mb-2 flex flex-col gap-1.5">
+            {m.results.map((r, j) => (
+              <ToolResultView key={j} name={r.name} data={r.data} />
+            ))}
           </div>
         )}
         {m.role === "assistant" && m.content && !m.content.startsWith("⚠️") ? (

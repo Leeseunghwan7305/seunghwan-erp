@@ -6,6 +6,7 @@ export interface Msg {
   role: Role;
   content: string;
   tools?: string[];
+  results?: { name: string; data: unknown }[]; // Generative UI용 도구 결과 원자료
 }
 export interface Conversation {
   id: string;

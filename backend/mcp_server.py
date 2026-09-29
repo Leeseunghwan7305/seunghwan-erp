@@ -33,11 +33,11 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
-from mcp.server.mcpserver import MCPServer  # noqa: E402
+from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 from app.chat.tools import execute_tool  # noqa: E402
 
-server = MCPServer(
+server = FastMCP(
     name="seunghwan-erp",
     instructions=(
         "제조·유통 ERP의 실시간 데이터(현황·재고·주문·거래처)와 사내 지식 문서를 "
