@@ -13,6 +13,8 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 - **대시보드** — 매출·매입·재고·정산 요약 지표
 - **AI 에이전트 ‘원장(元帳)’** — 정체성 + 5단계 리즈닝(의도 분류 → 근거 계획 → 도구 실행 → 자기 점검 → 답변)을 갖춘 RAG 에이전트. **실시간 수치는 도구 / 사내 규정은 문서 / 외부 정보는 웹**으로 스스로 근거 경로를 판단 (Claude API · 로컬 Ollama 모델 라우팅)
 - **실시간 스트리밍 채팅 UX** — 토큰 단위 스트리밍·생성 중 중지(AbortController)·점진적 Markdown 렌더·도구 실행 상태 표시·**멀티 대화(URL 딥링크 `?c=`)**·메시지 가상화·재시도/자동 재연결. 여기에 **자동높이 입력(Shift+Enter 줄바꿈)·답변 복사·다시 생성·‘↓ 최신으로’·토스트 알림** 등 편의 기능과 Playwright E2E 회귀 검증까지 (자세히는 [채팅 프론트엔드](#채팅-프론트엔드-스트리밍-ux) 참고)
+- **Generative UI** — 도구 실행 결과를 텍스트가 아니라 **React 컴포넌트**로 렌더. 재고 조회→표(안전재고 미달 빨강 하이라이트), 대시보드→지표 카드, 주문·거래처→리스트. 백엔드가 `tool_result`(원자료)를 스트리밍하면 도구 이름에 맞는 뷰로 시각화
+- **MCP 서버** — ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io)로 노출해 Claude Desktop 등 **외부 에이전트가 사내 데이터를 조회** (자세히는 [MCP 서버](#mcp-서버--erp를-외부-에이전트에-노출) 참고)
 - **RAG 지식 문서 관리** — 문서(PDF·MD·텍스트) 업로드 → 임베딩(`bge-m3`) 색인 → 검색. 챗봇이 사내 규정·매뉴얼을 **근거(출처)와 함께** 답변. 관리 페이지에서 업로드·색인 상태·검색 품질 테스트·삭제까지 제공
 - **근거 라우팅 & 할루시네이션 제어** — 검색·도구 결과를 근거로 자동 주입하고, 근거가 없으면 코드 레벨에서 답변 차단(`RAG_STRICT`). 임베딩 유사도 분포를 측정해 자동주입 임계값을 **0.50**(잡음/신호 사이)으로 캘리브레이션
 - **출처 배지(Provenance)** — 답변마다 근거 출처(🌐 웹 검색 / 📄 사내 문서 / 📊 ERP 데이터 / 🧠 근거 없음)를 표시해 오해를 제거
@@ -51,6 +53,11 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 "OO 등록해줘" → LLM이 **구조화 제안**을 만들고, 사용자가 확인(적용)해야 실제로 반영됩니다(human-in-the-loop).
 
 ![실행 에이전트가 품목 등록 제안 카드를 보여주는 모습](docs/screenshots/action-agent.png)
+
+### 5. Generative UI — 도구 결과를 표·카드로
+도구 실행 결과를 텍스트가 아니라 **React 컴포넌트**로 렌더합니다. "안전재고 미달 품목 표로 보여줘" → 재고 표가 그려지고 **미달 품목은 빨갛게** 강조됩니다(근거 배지 📄 사내 문서 · 📊 ERP 데이터).
+
+![재고 조회 결과가 표 컴포넌트로 렌더되고 안전재고 미달 품목이 빨갛게 강조된 화면](docs/screenshots/generative-ui.png)
 
 ## 아키텍처
 
@@ -138,6 +145,7 @@ AI 어시스턴트 화면(`/chat`)은 7단계로 설계·구현했습니다.
 | 6 | 성능 | Markdown `next/dynamic` 코드 스플리팅 · `@tanstack/react-virtual` 메시지 가상화 |
 | 7 | E2E | Playwright 회귀 테스트 |
 | + | UX 편의 | 자동높이 입력(Shift+Enter 줄바꿈)·답변 복사·다시 생성·‘↓ 최신으로’·토스트 알림·키보드 단축키(Esc 중지) |
+| + | Generative UI | 도구 결과(`tool_result`)를 표·카드 컴포넌트로 렌더(`ToolResultView`) — 재고표(미달 빨강)·대시보드 카드·주문/거래처 리스트 |
 
 관련 코드: `frontend/app/chat/page.tsx`, `frontend/app/components/Markdown.tsx`(의존성 없는 경량 렌더러), `frontend/app/lib/conversations.ts`, `frontend/app/providers.tsx`(QueryClient).
 
