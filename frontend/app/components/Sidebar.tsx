@@ -20,6 +20,7 @@ const groups: {
       { href: "/ai/agent", label: "브리핑 에이전트", module: "ai" },
       { href: "/ai/mcp", label: "MCP 에이전트", module: "ai" },
       { href: "/ai/embedding-map", label: "의미 지도", module: "ai" },
+      { href: "/ai/chart", label: "자연어 차트", module: "ai" },
       { href: "/ai/documents", label: "지식 문서", module: "ai" },
     ],
   },

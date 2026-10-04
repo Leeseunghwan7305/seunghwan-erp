@@ -74,6 +74,22 @@ TOOL_DEFS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_chart",
+        "description": "차트·그래프·추이를 요청하면 사용한다. kind로 종류를 고른다: "
+        "stock(품목별 재고), receivable(거래처별 미수금), orders_by_month(월별 주문 건수), "
+        "sales_purchase(매출 vs 매입). 결과를 화면이 그래프로 그려주므로, 호출 뒤엔 한 줄로 요약만 하라.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": ["stock", "receivable", "orders_by_month", "sales_purchase"],
+                }
+            },
+            "required": ["kind"],
+        },
+    },
+    {
         "name": "web_search",
         "description": "사내 데이터·문서로 답할 수 없는 '외부 정보'(시세·환율·일반 지식·최신 뉴스 등)를 웹에서 검색한다. 사내 재고·주문·규정은 다른 도구를 써라. 읽기 전용이라 안전하다.",
         "parameters": {
@@ -235,8 +251,47 @@ def _web_search(session: Session, query: str = "", max_results: int = 5) -> Any:
     ]
 
 
+def _get_chart(session: Session, kind: str = "stock") -> Any:
+    """자연어→차트: kind에 맞는 집계를 {chart:{type,title,unit,data}} 형태로 반환한다.
+    프론트의 ToolResultView가 이 스펙을 받아 막대/선 그래프로 렌더한다."""
+    if kind == "stock":
+        items = session.exec(select(Item)).all()
+        stocks = {s.item_id: s.quantity for s in session.exec(select(Stock)).all()}
+        data = sorted(
+            [{"label": it.name, "value": stocks.get(it.id, 0)} for it in items],
+            key=lambda d: -d["value"],
+        )[:12]
+        return {"chart": {"type": "bar", "title": "품목별 재고 (상위 12)", "unit": "개", "data": data}}
+    if kind == "receivable":
+        partners = {p.id: p.name for p in session.exec(select(Partner)).all()}
+        agg: dict[int, int] = {}
+        for v in session.exec(select(Voucher)).all():
+            if v.voucher_type == VoucherType.sale and v.payment_status == PaymentStatus.unpaid:
+                agg[v.partner_id] = agg.get(v.partner_id, 0) + v.amount
+        data = sorted(
+            [{"label": partners.get(pid, "?"), "value": amt} for pid, amt in agg.items()],
+            key=lambda d: -d["value"],
+        )[:10]
+        return {"chart": {"type": "bar", "title": "거래처별 미수금", "unit": "원", "data": data}}
+    if kind == "orders_by_month":
+        agg2: dict[str, int] = {}
+        for o in session.exec(select(Order)).all():
+            m = o.order_date.strftime("%Y-%m")
+            agg2[m] = agg2.get(m, 0) + 1
+        data = [{"label": m, "value": c} for m, c in sorted(agg2.items())]
+        return {"chart": {"type": "line", "title": "월별 주문 건수", "unit": "건", "data": data}}
+    if kind == "sales_purchase":
+        vs = session.exec(select(Voucher)).all()
+        sale = sum(v.amount for v in vs if v.voucher_type == VoucherType.sale)
+        pur = sum(v.amount for v in vs if v.voucher_type == VoucherType.purchase)
+        return {"chart": {"type": "bar", "title": "매출 vs 매입", "unit": "원",
+                          "data": [{"label": "매출", "value": sale}, {"label": "매입", "value": pur}]}}
+    return {"error": f"알 수 없는 차트 종류: {kind}"}
+
+
 _HANDLERS = {
     "get_dashboard": _get_dashboard,
+    "get_chart": _get_chart,
     "get_inventory": _get_inventory,
     "list_orders": _list_orders,
     "list_partners": _list_partners,

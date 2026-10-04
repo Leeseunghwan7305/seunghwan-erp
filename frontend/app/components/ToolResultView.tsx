@@ -16,7 +16,70 @@ export default function ToolResultView({ name, data }: { name: string; data: unk
   if (name === "get_dashboard" && data && typeof data === "object") return <DashboardCards d={data as Row} />;
   if (name === "list_orders" && Array.isArray(data)) return <OrdersList rows={data} />;
   if (name === "list_partners" && Array.isArray(data)) return <PartnersList rows={data} />;
+  if (name === "get_chart" && data && typeof data === "object" && (data as Row).chart)
+    return <ChartView spec={(data as Row).chart as ChartSpec} />;
   return null;
+}
+
+interface ChartSpec {
+  type: "bar" | "line";
+  title: string;
+  unit?: string;
+  data: { label: string; value: number }[];
+}
+
+function ChartView({ spec }: { spec: ChartSpec }) {
+  const data = spec.data ?? [];
+  if (!data.length) return <Empty label="차트 데이터가 없습니다." />;
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const fmt = (v: number) => (spec.unit === "원" ? won(v) : `${v.toLocaleString("ko-KR")}${spec.unit ?? ""}`);
+  return (
+    <div className="my-1 rounded-lg border border-line bg-surface p-3">
+      <div className="mb-2 text-xs font-semibold text-ink">{spec.title}</div>
+      {spec.type === "line" ? (
+        <LineChart data={data} />
+      ) : (
+        <div className="flex flex-col gap-1">
+          {data.map((d, i) => (
+            <div key={i} className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-2 text-xs">
+              <span className="truncate text-ink-2">{d.label}</span>
+              <span className="h-3.5 overflow-hidden rounded bg-brand-tint">
+                <span
+                  className="block h-full rounded bg-brand"
+                  style={{ width: `${Math.max(2, (d.value / max) * 100)}%` }}
+                />
+              </span>
+              <span className="text-right font-mono tabular-nums text-ink-2">{fmt(d.value)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LineChart({ data }: { data: { label: string; value: number }[] }) {
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const W = 100, H = 36, pad = 4;
+  const n = data.length;
+  const xs = (i: number) => (n <= 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (n - 1));
+  const ys = (v: number) => H - pad - (v / max) * (H - 2 * pad);
+  const pts = data.map((d, i) => `${xs(i)},${ys(d.value)}`).join(" ");
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: "auto" }} preserveAspectRatio="none">
+        <polyline points={pts} fill="none" stroke="var(--brand)" strokeWidth="0.8" />
+        {data.map((d, i) => (
+          <circle key={i} cx={xs(i)} cy={ys(d.value)} r="1" fill="var(--brand)" />
+        ))}
+      </svg>
+      <div className="mt-1 flex justify-between font-mono text-[10px] text-ink-3">
+        {data.map((d, i) => (
+          <span key={i}>{d.label.length >= 7 ? d.label.slice(5) : d.label}</span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function Empty({ label }: { label: string }) {
