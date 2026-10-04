@@ -1,5 +1,7 @@
 # 제조 ERP 프로토타입
 
+[![CI](https://github.com/Leeseunghwan7305/seunghwan-erp/actions/workflows/ci.yml/badge.svg)](https://github.com/Leeseunghwan7305/seunghwan-erp/actions/workflows/ci.yml)
+
 Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입니다.
 구매 → 재고 → 판매 → 정산으로 이어지는 핵심 업무 흐름과, **실시간 데이터·사내 문서·웹을 스스로 판단해 근거로 답하는 RAG 에이전트 ‘원장’**을 내장했습니다. 전체를 Docker Compose로 묶어 한 번에 실행합니다.
 
@@ -104,7 +106,7 @@ web (Next.js :3000)  ──REST·SSE──▶  api (FastAPI :8000)  ──psycop
 | 백엔드 | Python 3.12 · FastAPI 0.115 · Uvicorn · SQLModel 0.0.22 · Alembic 1.14 · psycopg2 |
 | 프론트엔드 | TypeScript 5.6 · Next.js 14.2 · React 18.3 · Tailwind CSS 3.4 · TanStack Query 5 · TanStack Virtual 3 |
 | AI | anthropic SDK · httpx · Ollama(로컬 LLM) · `bge-m3` 임베딩(RAG) · `ddgs`(웹 검색) |
-| 테스트 | Playwright(E2E) |
+| 테스트/CI | Jest·pytest(유닛) · Playwright(E2E) · GitHub Actions(CI) |
 | 인프라 | PostgreSQL 16 · Docker Compose |
 
 ## 빠른 시작
@@ -174,6 +176,19 @@ AI 어시스턴트 화면(`/chat`)은 7단계로 설계·구현했습니다.
 관련 코드: `frontend/app/chat/page.tsx`, `frontend/app/components/Markdown.tsx`(의존성 없는 경량 렌더러), `frontend/app/lib/conversations.ts`, `frontend/app/providers.tsx`(QueryClient).
 
 ## 테스트
+
+테스트 피라미드를 갖췄습니다 — **유닛(Jest·pytest) → E2E(Playwright) → 도메인 eval**. push마다 **GitHub Actions CI**가 타입체크·유닛테스트를 자동 실행합니다([워크플로](.github/workflows/ci.yml)).
+
+### 유닛 테스트 (Jest · pytest)
+
+```bash
+cd frontend && npm test        # Jest — Markdown 렌더러·Generative UI·XSS 방어
+cd backend  && python -m pytest -q   # pytest — 도구 스키마·근거 가드·에이전트 프롬프트
+```
+
+- **Jest**(프론트): 경량 Markdown 렌더러(굵게/코드/목록·링크 XSS 방어), `ToolResultView`(재고 표·미달 표시·차트) 등 순수 컴포넌트 검증.
+- **pytest**(백엔드): `TOOL_DEFS` 스키마·`get_chart` kind·`_guard_answer`(근거 없으면 차단) 등 DB·LLM 불필요한 순수 로직 검증.
+- Jest(유닛)와 Playwright(E2E)는 상호보완 — 유닛은 빠른 함수/컴포넌트, E2E는 브라우저 전체 플로우.
 
 ### E2E (Playwright)
 
