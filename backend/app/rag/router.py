@@ -255,3 +255,50 @@ def manual(req: ManualRequest):
         "text": _clean_manual(_join_chunks([c.content for c in chunks])),
         "score": best["score"],
     }
+
+
+@router.get("/embedding-map")
+def embedding_map():
+    """임베딩 의미 지도 — 품목·문서 청크를 bge-m3로 임베딩(문서는 저장분 재사용)하고
+    PCA로 2D 투영해 반환한다. '비슷한 것끼리 가까이' 모이는 의미 공간을 눈으로 본다.
+    """
+    import numpy as np
+
+    from ..models import Item
+
+    with Session(engine) as session:
+        items = session.exec(select(Item)).all()
+        rows = session.exec(
+            select(DocChunk, Document.title).join(Document, Document.id == DocChunk.document_id)
+        ).all()
+
+    labels: list[str] = []
+    types: list[str] = []
+    vecs: list[list[float]] = []
+
+    names = [it.name for it in items]
+    if names:
+        for name, v in zip(names, embed_texts(names)):
+            labels.append(name); types.append("item"); vecs.append(v)
+
+    for ch, title in rows:
+        if ch.embedding:
+            labels.append(f"{title} #{ch.ordinal}"); types.append("doc"); vecs.append(ch.embedding)
+
+    if len(vecs) < 2:
+        return {"points": []}
+
+    X = np.array(vecs, dtype=np.float32)
+    Xc = X - X.mean(axis=0)
+    # PCA: SVD로 상위 2개 주성분에 투영
+    _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
+    coords = Xc @ Vt[:2].T
+    mn = coords.min(axis=0)
+    rng = np.where(coords.max(axis=0) - mn == 0, 1, coords.max(axis=0) - mn)
+    norm = (coords - mn) / rng  # 0~1 정규화
+
+    points = [
+        {"label": labels[i], "type": types[i], "x": round(float(norm[i, 0]), 4), "y": round(float(norm[i, 1]), 4)}
+        for i in range(len(labels))
+    ]
+    return {"points": points, "item_count": len(names), "doc_count": len(points) - len(names)}

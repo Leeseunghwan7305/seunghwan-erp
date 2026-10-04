@@ -19,6 +19,7 @@ const groups: {
       { href: "/chat", label: "AI 어시스턴트", module: "ai" },
       { href: "/ai/agent", label: "브리핑 에이전트", module: "ai" },
       { href: "/ai/mcp", label: "MCP 에이전트", module: "ai" },
+      { href: "/ai/embedding-map", label: "의미 지도", module: "ai" },
       { href: "/ai/documents", label: "지식 문서", module: "ai" },
     ],
   },
