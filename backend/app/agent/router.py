@@ -20,6 +20,11 @@ class BriefRequest(SQLModel):
     model: Literal["claude", "local"] = "local"
 
 
+class McpRequest(SQLModel):
+    goal: str
+    model: Literal["local"] = "local"  # MCP 에이전트는 로컬(Ollama) 기준
+
+
 class ApplyRequest(SQLModel):
     proposal: dict[str, Any]
 
@@ -52,6 +57,25 @@ def agent_brief(req: BriefRequest):
         msgs = [{"role": "user", "content": req.goal}]
         runner = run_local if req.model == "local" else run_claude
         for event in runner(msgs, system_prompt=AGENT_BRIEF_PROMPT):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/mcp")
+async def agent_mcp(req: McpRequest):
+    """MCP 클라이언트 에이전트(SSE) — MCP 서버에서 도구를 동적 발견해 호출하며 목표 수행.
+
+    우리 ERP를 MCP '서버'로 노출한 것과 대칭: 여기선 에이전트가 MCP '클라이언트'가 된다.
+    """
+    from ..mcp_client import run_mcp_agent
+
+    async def event_stream():
+        async for event in run_mcp_agent(req.goal, req.model):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
