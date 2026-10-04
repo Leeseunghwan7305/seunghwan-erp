@@ -17,6 +17,7 @@ const groups: {
     title: "AI",
     items: [
       { href: "/chat", label: "AI 어시스턴트", module: "ai" },
+      { href: "/ai/agent", label: "브리핑 에이전트", module: "ai" },
       { href: "/ai/documents", label: "지식 문서", module: "ai" },
     ],
   },

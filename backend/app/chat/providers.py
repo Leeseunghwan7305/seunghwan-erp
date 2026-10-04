@@ -121,6 +121,20 @@ AGENT_RULES = (
 
 SYSTEM_PROMPT = AGENT_IDENTITY + REASONING_FRAMEWORK + AGENT_RULES
 
+# 자율 다단계 '브리핑' 모드: 한 도구에 그치지 말고 여러 조회 도구를 연쇄로 써서
+# 데이터를 모은 뒤 구조화된 브리핑으로 종합한다(읽기 전용).
+AGENT_BRIEF_PROMPT = (
+    "너는 '원장(元帳)' ERP 운영 에이전트의 '브리핑 모드'다. 사용자가 준 목표를 달성하기 위해, "
+    "필요한 정보를 여러 조회 도구로 차례로 모은 뒤 종합 브리핑을 작성한다.\n"
+    "- 목표에 필요한 도구를 적극적으로, 보통 2개 이상 사용하라(한 도구에 그치지 말 것). "
+    "재고=get_inventory, 주문=list_orders, 거래처=list_partners, 전체 현황=get_dashboard, "
+    "규정·정의=search_documents, 외부 정보=web_search.\n"
+    "- 한 번에 하나씩 도구를 호출해 데이터를 수집하고, 결과를 관찰한 뒤 다음에 필요한 도구를 정하라.\n"
+    "- 데이터를 충분히 모았으면 마지막에 한국어 브리핑을 Markdown으로 종합하라. 반드시 아래 4개 "
+    "섹션을 포함: '## 요약', '## 핵심 수치', '## 리스크', '## 권장 조치'.\n"
+    "- 수치는 도구 결과의 실제 값만 쓰고 지어내지 마라. 금액은 원(₩) 단위로 읽기 쉽게."
+)
+
 MAX_TOOL_ROUNDS = 6
 
 # Claude 전용: 답변을 '답 + 출처'로만. 군더더기 금지.
@@ -148,7 +162,7 @@ def _ollama_tools() -> list[dict]:
 
 # ---- Claude --------------------------------------------------------------
 
-def run_claude(messages: list[dict], model: str | None = None, doc_min_score: float | None = None) -> Iterator[dict]:
+def run_claude(messages: list[dict], model: str | None = None, doc_min_score: float | None = None, system_prompt: str | None = None) -> Iterator[dict]:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         yield {"type": "error", "content": "ANTHROPIC_API_KEY가 설정되지 않았습니다. 프로젝트 루트 .env에 키를 넣고 백엔드를 재시작하세요."}
@@ -165,7 +179,8 @@ def run_claude(messages: list[dict], model: str | None = None, doc_min_score: fl
     doc_ctx = _doc_context(messages, doc_min_score)
     has_doc = bool(doc_ctx)
     used_tool = False
-    system = SYSTEM_PROMPT + CLAUDE_TERSE + doc_ctx
+    # system_prompt override(브리핑 에이전트 등)가 오면 간결 모드(CLAUDE_TERSE) 없이 그걸 쓴다.
+    system = (system_prompt + doc_ctx) if system_prompt else (SYSTEM_PROMPT + CLAUDE_TERSE + doc_ctx)
     conv = [{"role": m["role"], "content": m["content"]} for m in messages]
     if has_doc:
         yield {"type": "tool", "name": "doc_context"}  # 문서 근거 자동 주입됨(출처 표시용)
@@ -228,13 +243,13 @@ def run_claude(messages: list[dict], model: str | None = None, doc_min_score: fl
 
 # ---- 로컬 (Ollama) --------------------------------------------------------
 
-def run_local(messages: list[dict], model: str | None = None, doc_min_score: float | None = None) -> Iterator[dict]:
+def run_local(messages: list[dict], model: str | None = None, doc_min_score: float | None = None, system_prompt: str | None = None) -> Iterator[dict]:
     base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     model = model or os.getenv("OLLAMA_MODEL", "qwen2.5")
     doc_ctx = _doc_context(messages, doc_min_score)
     has_doc = bool(doc_ctx)
     used_tool = False
-    conv: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT + doc_ctx}]
+    conv: list[dict[str, Any]] = [{"role": "system", "content": (system_prompt or SYSTEM_PROMPT) + doc_ctx}]
     conv += [{"role": m["role"], "content": m["content"]} for m in messages]
     if has_doc:
         yield {"type": "tool", "name": "doc_context"}  # 문서 근거 자동 주입됨(출처 표시용)
