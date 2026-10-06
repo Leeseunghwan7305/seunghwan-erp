@@ -372,16 +372,18 @@ def run_local(messages: list[dict], model: str | None = None, doc_min_score: flo
 
 
 def run_chat(
-    model_choice: str, messages: list[dict], doc_min_score: float | None = None
+    model_choice: str, messages: list[dict], doc_min_score: float | None = None,
+    local_model: str | None = None,
 ) -> Iterator[dict]:
     """model_choice: 'claude' | 'local'
 
     'claude'는 CLAUDE_SESSION_KEY(구독 쿠키)가 있으면 쿠키 provider를,
     없으면 공식 API provider(ANTHROPIC_API_KEY)를 사용한다.
     doc_min_score: 문서 자동검색 임계값 override(도움말 도우미는 낮게 줘서 SOP를 더 잘 찾음).
+    local_model: 로컬 Ollama 모델 태그 override(모델 아레나에서 7B/3B 지정).
     """
     if model_choice == "local":
-        yield from run_local(messages, doc_min_score=doc_min_score)
+        yield from run_local(messages, model=local_model, doc_min_score=doc_min_score)
     elif os.getenv("CLAUDE_SESSION_KEY", "").strip():
         from .claude_cookie import run_claude_cookie
         yield from run_claude_cookie(messages)

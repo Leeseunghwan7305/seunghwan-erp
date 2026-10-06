@@ -20,6 +20,8 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 - **자연어 → 차트(Text-to-Chart)** — "월별 주문 추이 차트로 보여줘"처럼 말하면, 에이전트가 집계 도구(`get_chart`)를 골라 데이터를 조회하고 **막대·선 그래프**로 렌더(Generative UI 확장). 재고·미수금·월별 주문·매출vs매입 지원
 - **MCP 서버** — ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io)로 노출해 Claude Desktop 등 **외부 에이전트가 사내 데이터를 조회** (자세히는 [MCP 서버](#mcp-서버--erp를-외부-에이전트에-노출) 참고)
 - **MCP 에이전트(클라이언트)** — 위 MCP 서버를 **거꾸로 소비**하는 에이전트. MCP 서버에 접속해 도구를 런타임에 **동적 발견**(`list_tools`)하고 **프로토콜로 호출**(`call_tool`)해 목표 수행 — 하드코딩 도구가 아니라 서버가 알려준 도구로 동작(`/agent/mcp`)
+- **모델 아레나(A/B)** — 같은 질문을 두 로컬 모델(`qwen2.5` 7B vs 3B)에 **동시 스트리밍**해 **첫 응답 지연·완료 시간·근거 경로·답변**을 나란히 비교. 모델 크기의 속도↔품질 트레이드오프를 눈으로 측정(`local_model` 오버라이드, `/ai/arena`)
+- **자가 개선 루프(Self-improving)** — 골든셋 eval을 돌려 **라우팅 회귀를 자동 탐지**하고(답변이 아니라 근거 경로를 채점), 실패 케이스를 LLM에 넘겨 **스스로 근본 원인을 진단하고 고칠 레버(임계값·프롬프트·웹폴백)를 제안**. 측정 → 자기 진단 → 개선안의 폐루프(제안만, 읽기 전용, `/agent/self-improve`)
 - **RAG 지식 문서 관리** — 문서(PDF·MD·텍스트) 업로드 → 임베딩(`bge-m3`) 색인 → 검색. 챗봇이 사내 규정·매뉴얼을 **근거(출처)와 함께** 답변. 관리 페이지에서 업로드·색인 상태·검색 품질 테스트·삭제까지 제공
 - **근거 라우팅 & 할루시네이션 제어** — 검색·도구 결과를 근거로 자동 주입하고, 근거가 없으면 코드 레벨에서 답변 차단(`RAG_STRICT`). 임베딩 유사도 분포를 측정해 자동주입 임계값을 **0.50**(잡음/신호 사이)으로 캘리브레이션
 - **출처 배지(Provenance)** — 답변마다 근거 출처(🌐 웹 검색 / 📄 사내 문서 / 📊 ERP 데이터 / 🧠 근거 없음)를 표시해 오해를 제거
@@ -84,6 +86,16 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 "품목별 재고 상위를 차트로 보여줘" → 에이전트가 집계 도구를 골라 조회하고 **막대·선 그래프**로 그려줍니다.
 
 ![자연어 요청으로 품목별 재고 상위 막대 차트가 그려진 화면](docs/screenshots/text-to-chart.png)
+
+### 10. 모델 아레나 — 같은 질문, 두 모델 동시 대결
+같은 질문을 `qwen2.5` **7B vs 3B**에 동시에 스트리밍해 **첫 응답 지연·완료 시간·근거 배지·답변**을 나란히 비교합니다. 모델 크기의 속도↔품질 트레이드오프를 눈으로 측정합니다.
+
+![모델 아레나가 7B와 3B의 답변을 나란히 두고 첫 응답·완료 시간과 문서 근거 배지를 비교하는 화면](docs/screenshots/arena.png)
+
+### 11. 자가 개선 루프 — 측정 → 자기 진단 → 개선안
+골든셋 eval을 돌려 **라우팅 회귀를 케이스별로 채점**(답변이 아니라 근거 경로)하고, 실패를 LLM에 넘겨 **스스로 근본 원인을 진단하고 고칠 레버(임계값·프롬프트·웹폴백)를 제안**합니다. 폐루프지만 제안만 하고 코드는 사람이 판단해 적용합니다(읽기 전용).
+
+![자가 개선 루프가 골든셋 10개 케이스의 pass/fail 표를 보여준 뒤 LLM이 진단과 개선 제안을 생성한 화면](docs/screenshots/self-improve.png)
 
 ## 아키텍처
 
@@ -246,11 +258,12 @@ ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io) �
 | GET/POST | `/orders` | 주문 목록 / 생성(구매·판매) |
 | POST | `/orders/{id}/confirm` | **주문 확정 → 재고 자동 반영 + 전표 생성** |
 | GET | `/employees` · `/accounts` · `/expenses` · `/roles` | 인사·회계·권한 조회 |
-| POST | `/chat` | AI 에이전트 챗봇 (SSE 스트리밍) |
+| POST | `/chat` | AI 에이전트 챗봇 (SSE 스트리밍, `local_model`로 로컬 모델 지정 — 모델 아레나) |
 | POST/GET | `/rag/documents` · `/rag/search` | 문서 업로드·색인·검색(RAG 관리) |
 | POST | `/agent/plan` · `/agent/apply` | 실행 에이전트: 변경 계획 제안 → 확인 후 적용 |
 | POST | `/agent/brief` | 자율 브리핑 에이전트(SSE): 목표 → 다단계 자율 수집 → 종합 |
 | POST | `/agent/mcp` | MCP 에이전트(SSE): MCP 서버 도구 동적 발견 → 프로토콜 호출 → 종합 |
+| POST | `/agent/self-improve` | 자가 개선 루프(SSE): 골든셋 eval → 케이스별 pass/fail → LLM 자가 진단·개선 제안 |
 | POST/GET | `/integrations/slack/send` · `/integrations/audit` | 알림 전송(확인 후) · 감사 로그 조회 |
 
 전체 스펙은 Swagger UI(`/docs`)에서 확인할 수 있습니다.

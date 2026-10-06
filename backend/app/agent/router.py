@@ -25,6 +25,10 @@ class McpRequest(SQLModel):
     model: Literal["local"] = "local"  # MCP 에이전트는 로컬(Ollama) 기준
 
 
+class SelfImproveRequest(SQLModel):
+    model: str = "local"  # 평가·진단에 쓸 모델(로컬 Ollama 기준)
+
+
 class ApplyRequest(SQLModel):
     proposal: dict[str, Any]
 
@@ -57,6 +61,23 @@ def agent_brief(req: BriefRequest):
         msgs = [{"role": "user", "content": req.goal}]
         runner = run_local if req.model == "local" else run_claude
         for event in runner(msgs, system_prompt=AGENT_BRIEF_PROMPT):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/self-improve")
+def agent_self_improve(req: SelfImproveRequest):
+    """자가 개선 루프(SSE) — eval 골든셋을 돌려 라우팅 회귀를 찾고(케이스별 pass/fail),
+    LLM이 스스로 근본 원인을 진단하고 고칠 레버를 제안한다. 제안만, 자동 수정 없음(읽기 전용)."""
+    from .self_improve import run_self_improve
+
+    def event_stream():
+        for event in run_self_improve(req.model):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

@@ -20,6 +20,8 @@ class ChatRequest(SQLModel):
     messages: list[ChatMessage]
     # 문서 자동검색 임계값 override. 도움말 도우미가 0.35 정도로 낮춰 SOP를 더 잘 찾게 함.
     doc_min_score: Optional[float] = None
+    # 로컬(Ollama) 모델 태그 override. 모델 아레나가 7B/3B를 각각 지정할 때 사용.
+    local_model: Optional[str] = None
 
 
 @router.post("")
@@ -28,7 +30,7 @@ def chat(req: ChatRequest):
 
     def event_stream():
         msgs = [{"role": m.role, "content": m.content} for m in req.messages]
-        for event in run_chat(req.model, msgs, doc_min_score=req.doc_min_score):
+        for event in run_chat(req.model, msgs, doc_min_score=req.doc_min_score, local_model=req.local_model):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
