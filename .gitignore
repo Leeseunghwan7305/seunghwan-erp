@@ -30,3 +30,6 @@ yarn-error.log*
 /frontend/playwright-report/
 /frontend/blob-report/
 /frontend/.playwright-mcp/
+
+# CLIP 이미지 업로드(런타임 산출물)
+backend/uploads/

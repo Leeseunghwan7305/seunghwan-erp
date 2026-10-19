@@ -23,6 +23,7 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 - **모델 아레나(A/B)** — 같은 질문을 두 로컬 모델(`qwen2.5` 7B vs 3B)에 **동시 스트리밍**해 **첫 응답 지연·완료 시간·근거 경로·답변**을 나란히 비교. 모델 크기의 속도↔품질 트레이드오프를 눈으로 측정(`local_model` 오버라이드, `/ai/arena`)
 - **자가 개선 루프(Self-improving)** — 골든셋 eval을 돌려 **라우팅 회귀를 자동 탐지**하고(답변이 아니라 근거 경로를 채점), 실패 케이스를 LLM에 넘겨 **스스로 근본 원인을 진단하고 고칠 레버(임계값·프롬프트·웹폴백)를 제안**. 측정 → 자기 진단 → 개선안의 폐루프(제안만, 읽기 전용, `/agent/self-improve`)
 - **Text-to-SQL(자연어 DB 질의)** — 자연어 질문을 PostgreSQL **SELECT로 생성**해 ERP DB에 직접 묻고 결과를 표로 렌더. 생성된 SQL을 **그대로 공개**(투명성)하고, **3겹 방어**로 안전 실행 — ① 프롬프트로 SELECT 유도 → ② 코드 가드(denylist·단일문·`;`/주석 차단·LIMIT 강제) → ③ `postgresql_readonly` 트랜잭션 + `statement_timeout`. 쓰기·DDL은 DB 레벨에서 거부(`/agent/text-to-sql`)
+- **CLIP 이미지 검색(멀티모달)** — 이미지·텍스트를 **같은 임베딩 공간**에 넣어 말로 이미지를 찾거나(텍스트→이미지) 이미지로 비슷한 이미지를 찾습니다(이미지→이미지). 이미지 인코더는 `clip-ViT-B-32`, **텍스트는 다국어 정렬 모델**(`clip-ViT-B-32-multilingual-v1`)로 한국어 쿼리까지 지원. 기존 RAG와 동일하게 임베딩을 JSONB에 저장하고 numpy 코사인으로 검색(`torch`는 선택적 의존성, `/rag/image/*`)
 - **RAG 지식 문서 관리** — 문서(PDF·MD·텍스트) 업로드 → 임베딩(`bge-m3`) 색인 → 검색. 챗봇이 사내 규정·매뉴얼을 **근거(출처)와 함께** 답변. 관리 페이지에서 업로드·색인 상태·검색 품질 테스트·삭제까지 제공
 - **근거 라우팅 & 할루시네이션 제어** — 검색·도구 결과를 근거로 자동 주입하고, 근거가 없으면 코드 레벨에서 답변 차단(`RAG_STRICT`). 임베딩 유사도 분포를 측정해 자동주입 임계값을 **0.50**(잡음/신호 사이)으로 캘리브레이션
 - **출처 배지(Provenance)** — 답변마다 근거 출처(🌐 웹 검색 / 📄 사내 문서 / 📊 ERP 데이터 / 🧠 근거 없음)를 표시해 오해를 제거
@@ -103,6 +104,11 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 
 ![자연어 '월별 주문 건수'를 SELECT로 변환해 읽기전용 가드 통과 배지와 함께 월별 집계 결과를 표로 보여주는 화면](docs/screenshots/text-to-sql.png)
 
+### 13. CLIP 이미지 검색 — 말로 이미지를, 이미지로 이미지를
+이미지와 텍스트를 **같은 CLIP 임베딩 공간**에 넣어, "빨간 음료 캔" 같은 **한국어 텍스트로 이미지를 검색**하거나 이미지를 올려 비슷한 이미지를 찾습니다. 텍스트는 다국어 정렬 모델을 써 한국어 쿼리가 영어 CLIP 이미지 공간과 매칭됩니다. (샘플은 외부 저작권 없이 PIL로 합성)
+
+![한국어 '빨간 음료 캔' 질의에 빨간 캔이 유사도 1위로 뜨고 캔·병·상자 제품 이미지가 유사도순 그리드로 정렬된 화면](docs/screenshots/image-search.png)
+
 ## 아키텍처
 
 ```
@@ -143,6 +149,9 @@ docker compose up --build
 
 최초 기동 시 `SEED_ON_START=true`면 샘플 품목·거래처·직원 데이터가 자동 삽입됩니다.
 DB 데이터를 완전히 초기화하려면 `docker compose down -v`로 볼륨까지 삭제하세요.
+
+> **선택: CLIP 이미지 검색** — `torch`가 무거워 기본 설치에서 제외했습니다. 이미지 검색(`/ai/image-search`)을 쓰려면
+> `pip install -r backend/requirements-ml.txt`를 추가로 실행하세요. 최초 검색 시 CLIP 모델을 내려받고 합성 샘플 이미지를 생성합니다.
 
 ## 환경 변수 (`.env`)
 
@@ -271,6 +280,7 @@ ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io) �
 | POST | `/agent/mcp` | MCP 에이전트(SSE): MCP 서버 도구 동적 발견 → 프로토콜 호출 → 종합 |
 | POST | `/agent/self-improve` | 자가 개선 루프(SSE): 골든셋 eval → 케이스별 pass/fail → LLM 자가 진단·개선 제안 |
 | POST | `/agent/text-to-sql` | Text-to-SQL(SSE): 자연어 → SELECT 생성 → 읽기전용 가드 → 실행 → 결과 표 |
+| POST/GET | `/rag/image/search` · `/rag/image/search-by-image` · `/rag/image/upload` | CLIP 이미지 검색: 텍스트/이미지 쿼리 → 유사 이미지 top-k, 업로드 색인 |
 | POST/GET | `/integrations/slack/send` · `/integrations/audit` | 알림 전송(확인 후) · 감사 로그 조회 |
 
 전체 스펙은 Swagger UI(`/docs`)에서 확인할 수 있습니다.

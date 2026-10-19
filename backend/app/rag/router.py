@@ -3,6 +3,7 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlmodel import Session, SQLModel, select
 
 from ..database import engine
@@ -37,6 +38,11 @@ class SearchRequest(SQLModel):
 class ManualRequest(SQLModel):
     query: str
     section: Optional[str] = None  # 예: "4.4" — 주면 그 섹션만 정확히 잘라 반환
+
+
+class ImageSearchRequest(SQLModel):
+    query: str
+    top_k: int = 8
 
 
 def _to_read(doc: Document) -> DocumentRead:
@@ -302,3 +308,76 @@ def embedding_map():
         for i in range(len(labels))
     ]
     return {"points": points, "item_count": len(names), "doc_count": len(points) - len(names)}
+
+
+# ---- CLIP 이미지 검색 -----------------------------------------------------
+
+def _clip_guard(fn):
+    """CLIP(torch) 미설치 시 503으로 친절히 안내하는 래퍼."""
+    try:
+        return fn()
+    except RuntimeError as e:
+        if "CLIP 미설치" in str(e):
+            raise HTTPException(status_code=503, detail=str(e))
+        raise
+
+
+@router.post("/image/search")
+def image_search(req: ImageSearchRequest):
+    """텍스트 쿼리 → CLIP 텍스트 임베딩 → 저장 이미지와 코사인 → 유사 이미지 top-k.
+    샘플이 없으면 합성 샘플을 먼저 생성한다(최초 1회)."""
+    from .clip_search import ensure_samples, search_by_text
+
+    def run():
+        created = ensure_samples()
+        return {"results": search_by_text(req.query, req.top_k), "samples_created": created}
+
+    return _clip_guard(run)
+
+
+@router.post("/image/search-by-image")
+async def image_search_by_image(file: UploadFile = File(...), top_k: int = Form(8)):
+    """이미지 업로드 → CLIP 이미지 임베딩 → 저장 이미지와 코사인 → 유사 이미지 top-k."""
+    from .clip_search import ensure_samples, search_by_image
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="빈 파일입니다.")
+
+    def run():
+        ensure_samples()
+        return {"results": search_by_image(data, top_k)}
+
+    return _clip_guard(run)
+
+
+@router.post("/image/upload", status_code=201)
+async def image_upload(file: UploadFile = File(...), label: str = Form("")):
+    """이미지 업로드 → CLIP 임베딩 후 검색 대상에 등록."""
+    from .clip_search import add_image
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="빈 파일입니다.")
+
+    def run():
+        row = add_image(data, label=label, is_sample=False)
+        return {"id": row.id, "filename": row.filename, "label": row.label}
+
+    return _clip_guard(run)
+
+
+@router.get("/image/{image_id}/file")
+def image_file(image_id: int):
+    """저장된 이미지 파일(썸네일용) 서빙."""
+    from .clip_search import IMAGES_DIR
+    from ..models import ItemImage
+
+    with Session(engine) as s:
+        row = s.get(ItemImage, image_id)
+    if not row or not row.filename:
+        raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다.")
+    path = IMAGES_DIR / row.filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="파일이 없습니다.")
+    return FileResponse(path, media_type="image/png")

@@ -214,3 +214,18 @@ class DocChunk(SQLModel, table=True):
     embedding: list[float] = Field(default_factory=list, sa_column=Column(JSONB))
 
     document: Optional[Document] = Relationship(back_populates="chunks")
+
+
+# ---- AI: 이미지 검색(CLIP) -------------------------------------------------
+
+class ItemImage(SQLModel, table=True):
+    """제품 이미지 + CLIP 임베딩(dim 512, clip-ViT-B-32). 이미지·텍스트 공유 공간.
+
+    텍스트 쿼리와 이미지 쿼리를 같은 공간에서 코사인 비교해 유사 이미지를 찾는다.
+    실제 파일은 uploads/images/에, 임베딩은 JSONB로 저장(기존 RAG 패턴과 동일)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    filename: str                     # uploads/images/ 내 파일명
+    label: str = ""                   # 표시용 라벨(품목명 등)
+    is_sample: bool = False           # 시드로 생성한 합성 샘플 여부
+    embedding: list[float] = Field(default_factory=list, sa_column=Column(JSONB))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
