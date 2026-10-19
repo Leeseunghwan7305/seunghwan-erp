@@ -194,6 +194,7 @@ export interface RagSearchHit {
   ordinal: number;
   content: string;
   score: number;
+  rerank_score?: number; // rerank=true일 때만 — cross-encoder 재점수
 }
 
 export interface RagDocumentContent {
@@ -267,8 +268,8 @@ export const api = {
   deleteRagDocument: (id: number) => del(`/rag/documents/${id}`),
   ragDocumentContent: (id: number) =>
     request<RagDocumentContent>(`/rag/documents/${id}/content`),
-  ragSearch: (query: string, top_k = 5) =>
-    post<{ results: RagSearchHit[] }>("/rag/search", { query, top_k }),
+  ragSearch: (query: string, top_k = 5, rerank = false) =>
+    post<{ results: RagSearchHit[] }>("/rag/search", { query, top_k, rerank }),
   ragManual: (query: string, section?: string) =>
     post<RagManual>("/rag/manual", { query, section }),
 

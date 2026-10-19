@@ -27,6 +27,7 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 - **출처 배지(Provenance)** — 답변마다 근거 출처(🌐 웹 검색 / 📄 사내 문서 / 📊 ERP 데이터 / 🧠 근거 없음)를 표시해 오해를 제거
 - **웹 검색(web_search)** — 사내 데이터로 답할 수 없는 외부 정보는 웹 검색으로 라우팅. 로컬 모델의 도구호출 실패는 서버측 폴백 검색으로 보완
 - **RAG 지식 문서 관리** — 문서(PDF·MD·텍스트) 업로드 → 임베딩(`bge-m3`) 색인 → 검색. 챗봇이 사내 규정·매뉴얼을 **근거(출처)와 함께** 답변. 관리 페이지에서 업로드·색인 상태·검색 품질 테스트·삭제까지 제공
+- **2단계 검색 + 리랭커(cross-encoder)** — 1차로 bge-m3 코사인이 넓게(top-20) 후보를 뽑고, **cross-encoder가 (질의, 본문) 쌍을 직접 보고 재정렬**해 정밀한 top-5를 낸다. 임베딩 내적보다 느리지만 정확 — 코사인이 낮아도 더 관련 있는 청크를 1위로 올린다. `eval/rerank_compare.py`로 **전/후를 측정**(현재 골든셋에서 Top-1 90%→100%, MRR 0.95→1.0). 기본 off라 CI·게이트의 numpy 경로는 불변, `torch`는 선택적(`rerank=true`, `/ai/documents` 토글)
 
 **UX & 상호작용**
 
@@ -126,6 +127,11 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 
 ![한국어 '빨간 음료 캔' 질의에 빨간 캔이 유사도 1위로 뜨고 캔·병·상자 제품 이미지가 유사도순 그리드로 정렬된 화면](docs/screenshots/image-search.png)
 
+### 14. 2단계 검색 + 리랭커 — 유사도가 낮아도 더 관련 있는 걸 1위로
+검색 테스트에서 **리랭커 토글**을 켜면, 1차 코사인 후보를 cross-encoder가 재정렬합니다. 아래 예시에서 **#1(리랭크 1.653)의 코사인 유사도(0.666)는 #2(0.700)보다 낮지만**, 질문("전표가 어떻게 생겨?")에 더 정확히 답하는 청크라 1위로 올라갔습니다 — 리랭킹의 핵심 가치.
+
+![지식 문서 검색 테스트에서 리랭커를 켜고 '구매 발주하면 전표가 어떻게 생겨?'를 검색하자, 코사인 유사도가 더 낮은 청크가 리랭크 점수로 1위에 오른 화면](docs/screenshots/reranker.png)
+
 ## 아키텍처
 
 ```
@@ -167,8 +173,9 @@ docker compose up --build
 최초 기동 시 `SEED_ON_START=true`면 샘플 품목·거래처·직원 데이터가 자동 삽입됩니다.
 DB 데이터를 완전히 초기화하려면 `docker compose down -v`로 볼륨까지 삭제하세요.
 
-> **선택: CLIP 이미지 검색** — `torch`가 무거워 기본 설치에서 제외했습니다. 이미지 검색(`/ai/image-search`)을 쓰려면
-> `pip install -r backend/requirements-ml.txt`를 추가로 실행하세요. 최초 검색 시 CLIP 모델을 내려받고 합성 샘플 이미지를 생성합니다.
+> **선택: CLIP 이미지 검색 · RAG 리랭커** — `torch`가 무거워 기본 설치에서 제외했습니다. 이미지 검색(`/ai/image-search`)이나
+> 리랭커(`/ai/documents`의 검색 테스트 토글)를 쓰려면 `pip install -r backend/requirements-ml.txt`를 추가로 실행하세요.
+> 최초 사용 시 해당 모델(CLIP / cross-encoder)을 내려받습니다. 둘 다 기본 off라 설치 전에도 나머지 기능은 정상 동작합니다.
 
 ## 환경 변수 (`.env`)
 
@@ -266,6 +273,16 @@ cd backend && python eval/run_rag_eval.py   # 커밋된 fixture 위에서 numpy 
 - 통과율이 `RAG_EVAL_MIN`(기본 0.8) 미만이면 종료코드 1 → **CI `rag-eval` 잡**과 **`.githooks/pre-push` 훅**이 merge/push를 차단한다(우회: `git push --no-verify`).
 - 훅 활성화: `git config core.hooksPath .githooks` (한 번만).
 
+### 리랭커 전/후 측정 (선택 · torch)
+
+```bash
+cd backend && python eval/rerank_compare.py   # cross-encoder 필요(requirements-ml.txt)
+```
+
+- 같은 골든셋·같은 1차 후보를 두고 **코사인 top-k vs 리랭크 top-k**의 Top-1 정확도·MRR을 비교한다.
+- 거친 Hit@5는 이미 포화(10/10)지만, 더 섬세한 지표에서 리랭커의 이득이 드러난다 — **Top-1 90%→100%, MRR 0.95→1.0**.
+- 게이트(`run_rag_eval.py`)는 건드리지 않는 로컬 측정용 — "거친 지표가 포화면 섬세한 지표로 본다"는 측정 설계를 보여준다.
+
 ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Desktop 같은 **외부 MCP 클라이언트**가 이 서버에 연결하면, 챗봇이 쓰는 것과 **동일한 도구**(현황·재고·주문·거래처·문서검색)를 그대로 호출할 수 있습니다.
 
 ```bash
@@ -299,7 +316,7 @@ ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io) �
 | POST | `/orders/{id}/confirm` | **주문 확정 → 재고 자동 반영 + 전표 생성** |
 | GET | `/employees` · `/accounts` · `/expenses` · `/roles` | 인사·회계·권한 조회 |
 | POST | `/chat` | AI 에이전트 챗봇 (SSE 스트리밍, `local_model`로 로컬 모델 지정 — 모델 아레나) |
-| POST/GET | `/rag/documents` · `/rag/search` | 문서 업로드·색인·검색(RAG 관리) |
+| POST/GET | `/rag/documents` · `/rag/search` | 문서 업로드·색인·검색(RAG 관리). `rerank=true`로 cross-encoder 2단계 재정렬 |
 | POST | `/agent/plan` · `/agent/apply` | 실행 에이전트: 변경 계획 제안 → 확인 후 적용 |
 | POST | `/agent/brief` | 자율 브리핑 에이전트(SSE): 목표 → 다단계 자율 수집 → 종합 |
 | POST | `/agent/mcp` | MCP 에이전트(SSE): MCP 서버 도구 동적 발견 → 프로토콜 호출 → 종합 |
@@ -330,9 +347,9 @@ seunghwan-erp/
 ├── backend/
 │   ├── Dockerfile
 │   ├── requirements.txt        # 기본 의존성
-│   ├── requirements-ml.txt     # 선택: CLIP 이미지 검색(sentence-transformers·torch)
+│   ├── requirements-ml.txt     # 선택: CLIP 이미지 검색 · RAG 리랭커(sentence-transformers·torch)
 │   ├── mcp_server.py           # ERP 도구를 MCP 서버로 노출(stdio)
-│   ├── eval/                   # 측정 하네스: run_eval(라우팅)·run_rag_eval(검색 게이트)·골든셋·fixture
+│   ├── eval/                   # 측정 하네스: run_eval(라우팅)·run_rag_eval(검색 게이트)·rerank_compare(리랭커 전/후)·골든셋·fixture
 │   ├── tests/                  # pytest(순수 로직: 도구·근거 가드·SQL 가드·CLIP 코사인)
 │   └── app/
 │       ├── main.py             # FastAPI 앱 · lifespan(DB 대기·시드) · CORS · 라우터 등록
@@ -344,7 +361,7 @@ seunghwan-erp/
 │       ├── mcp_client.py       # MCP 클라이언트 에이전트(도구 동적 발견·호출)
 │       ├── routers/            # dashboard · items · partners · orders · employees · roles · accounts · expenses
 │       ├── chat/               # AI 에이전트: router(SSE) · providers(라우팅·리즈닝·스트리밍) · tools
-│       ├── rag/                # RAG: retrieval · embeddings · chunk · extract · clip_search · router(문서·검색·이미지)
+│       ├── rag/                # RAG: retrieval · embeddings · chunk · extract · rerank · clip_search · router(문서·검색·이미지)
 │       ├── agent/              # 에이전트 라우터: plan/apply · brief · mcp · self_improve · text_to_sql
 │       └── integrations/       # 외부 연동: slack(웹훅) · router(전송·감사 조회)
 └── frontend/
@@ -365,7 +382,7 @@ seunghwan-erp/
 
 - **포함:** 핵심 업무 흐름(구매→재고→판매→정산), 화면·데이터 구조 검증, RAG 에이전트(도구·문서·웹 라우팅) · 실시간 스트리밍 채팅 UX(멀티대화·가상화·중지·재시도) · RAG 지식 검색·관리 · 화면 도우미 · 실행(쓰기) 에이전트 · MCP 서버/에이전트 · 브리핑 에이전트 · 모델 아레나 · 자가 개선 루프 · Text-to-SQL · CLIP 이미지 검색 · 외부 알림·감사 로그 · 권한 관리(UI 레벨) · 유닛/E2E/라우팅 eval 테스트
 - **제외:** API 레벨 인증(현재 접근제어는 UI 레벨), 세금계산서 발행, 실 결제
-- **다음 단계:** 문서 주제별 분리·리랭커로 검색 품질 개선, 다단계(멀티스텝) 에이전틱 워크플로, 스트림 중간 끊김 재개(resume), API 레벨 인증·감사 강화
+- **다음 단계:** 문서 주제별 분리로 검색 품질 추가 개선, 다단계(멀티스텝) 에이전틱 워크플로, 스트림 중간 끊김 재개(resume), API 레벨 인증·감사 강화
 
 자세한 기획은 [`erp-prototype-plan.html`](./erp-prototype-plan.html), AI 챗봇 설계는 [`docs/ai-chatbot-plan.md`](./docs/ai-chatbot-plan.md) 참고.
 

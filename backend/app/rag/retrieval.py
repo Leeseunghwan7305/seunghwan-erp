@@ -11,10 +11,16 @@ from ..models import DocChunk, Document, DocStatus
 from .embeddings import embed_query
 
 
-def search(query: str, top_k: int = 5) -> list[dict]:
+# 리랭크 시 cross-encoder에 넘길 1차(코사인) 후보 풀 크기. 넓게 뽑아 정밀 재정렬.
+RERANK_POOL = 20
+
+
+def search(query: str, top_k: int = 5, rerank: bool = False) -> list[dict]:
     """query와 가장 유사한 청크 top_k를 반환.
 
-    반환 항목: {document_id, title, ordinal, content, score}
+    반환 항목: {document_id, title, ordinal, content, score(코사인), [rerank_score]}
+    rerank=True면 코사인 top-RERANK_POOL을 뽑아 cross-encoder로 재정렬해 top_k를 낸다
+    (2단계 검색). 기본(False)은 numpy 코사인만 — DB·torch 외 의존성 없음.
     ready 문서가 없거나 query가 비면 빈 리스트.
     """
     query = (query or "").strip()
@@ -40,7 +46,9 @@ def search(query: str, top_k: int = 5) -> list[dict]:
     q_norm = q / (np.linalg.norm(q) + 1e-8)
     scores = matrix_norm @ q_norm
 
-    top_idx = np.argsort(scores)[::-1][:top_k]
+    # 리랭크면 넓게(top-POOL) 뽑아 재정렬 단계로 넘긴다.
+    stage1_k = RERANK_POOL if rerank else top_k
+    top_idx = np.argsort(scores)[::-1][:stage1_k]
     results = []
     for i in top_idx:
         chunk, title = chunks[int(i)]
@@ -53,6 +61,10 @@ def search(query: str, top_k: int = 5) -> list[dict]:
                 "score": round(float(scores[int(i)]), 4),
             }
         )
+
+    if rerank:
+        from .rerank import rerank as _rerank
+        return _rerank(query, results, top_k)
     return results
 
 

@@ -193,6 +193,8 @@ function AddDocument({ onAdded }: { onAdded: () => void }) {
 function SearchTest() {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<RagSearchHit[] | null>(null);
+  const [reranked, setReranked] = useState(false); // 마지막 결과가 리랭크였는지(배지용)
+  const [rerank, setRerank] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -202,8 +204,9 @@ function SearchTest() {
     setBusy(true);
     setErr("");
     try {
-      const { results } = await api.ragSearch(query.trim());
+      const { results } = await api.ragSearch(query.trim(), 5, rerank);
       setHits(results);
+      setReranked(rerank);
     } catch (e) {
       setErr((e as Error).message);
       setHits(null);
@@ -214,7 +217,18 @@ function SearchTest() {
 
   return (
     <div className="rounded-card border border-line bg-surface p-5">
-      <p className="eyebrow mb-3">검색 테스트</p>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="eyebrow">검색 테스트</p>
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
+          <input
+            type="checkbox"
+            checked={rerank}
+            onChange={(e) => setRerank(e.target.checked)}
+            className="accent-brand"
+          />
+          리랭커(cross-encoder) 적용
+        </label>
+      </div>
       <form onSubmit={run} className="flex gap-2">
         <input
           className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none"
@@ -227,7 +241,7 @@ function SearchTest() {
           disabled={busy || !query.trim()}
           className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
         >
-          검색
+          {busy ? "검색 중…" : "검색"}
         </button>
       </form>
 
@@ -240,9 +254,18 @@ function SearchTest() {
         {hits?.map((h, i) => (
           <div key={i} className="rounded-lg border border-line bg-surface-2 p-3">
             <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="text-sm font-medium text-ink">{h.title}</span>
+              <span className="flex items-center gap-2 text-sm font-medium text-ink">
+                {reranked && (
+                  <span className="num rounded bg-brand-tint px-1.5 py-0.5 text-[11px] text-brand-strong">
+                    #{i + 1}
+                  </span>
+                )}
+                {h.title}
+              </span>
               <span className="num text-[12px] text-brand-strong">
-                유사도 {h.score.toFixed(3)}
+                {reranked && h.rerank_score !== undefined
+                  ? `리랭크 ${h.rerank_score.toFixed(3)} · 유사도 ${h.score.toFixed(3)}`
+                  : `유사도 ${h.score.toFixed(3)}`}
               </span>
             </div>
             <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-ink-2">

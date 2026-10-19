@@ -33,6 +33,7 @@ class DocumentRead(SQLModel):
 class SearchRequest(SQLModel):
     query: str
     top_k: int = 5
+    rerank: bool = False  # True면 cross-encoder 2단계 재정렬(선택적 torch)
 
 
 class ManualRequest(SQLModel):
@@ -193,8 +194,13 @@ def delete_document(document_id: int):
 
 @router.post("/search")
 def search_documents(req: SearchRequest):
-    """유사 청크 top_k 조회(관리 페이지 검색 테스트 · 내부 재사용)."""
-    return {"results": search(req.query, req.top_k)}
+    """유사 청크 top_k 조회(관리 페이지 검색 테스트 · 내부 재사용). rerank=True면 2단계 재정렬."""
+    try:
+        return {"results": search(req.query, req.top_k, rerank=req.rerank)}
+    except RuntimeError as e:
+        if "리랭커 미설치" in str(e):
+            raise HTTPException(status_code=503, detail=str(e))
+        raise
 
 
 # section 미지정 시(자유 조회) 최적 청크 앞뒤로 이어붙일 청크 수.

@@ -1,4 +1,6 @@
-# CLIP 이미지 검색용 선택적 의존성 (무거움 ~수백MB).
+# 선택적 ML 의존성 (무거움 ~수백MB, torch 포함).
 # 메인 requirements와 분리 — CI·기본 실행은 이거 없이도 동작하고,
-# 이미지 검색 기능을 쓸 때만 설치한다:  pip install -r backend/requirements-ml.txt
-sentence-transformers>=3,<6   # clip-ViT-B-32 (torch 포함)
+# 아래 기능을 쓸 때만 설치한다:  pip install -r backend/requirements-ml.txt
+#   - CLIP 이미지 검색 (clip-ViT-B-32 + clip-ViT-B-32-multilingual-v1)
+#   - RAG 리랭커       (cross-encoder/mmarco-mMiniLMv2-L12-H384-v1)
+sentence-transformers>=3,<6   # CLIP·CrossEncoder 모두 포함
