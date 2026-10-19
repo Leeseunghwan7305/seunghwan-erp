@@ -21,6 +21,7 @@ const groups: {
       { href: "/ai/mcp", label: "MCP 에이전트", module: "ai" },
       { href: "/ai/arena", label: "모델 아레나", module: "ai" },
       { href: "/ai/self-improve", label: "자가 개선 루프", module: "ai" },
+      { href: "/ai/sql", label: "자연어 DB 질의", module: "ai" },
       { href: "/ai/embedding-map", label: "의미 지도", module: "ai" },
       { href: "/ai/chart", label: "자연어 차트", module: "ai" },
       { href: "/ai/documents", label: "지식 문서", module: "ai" },

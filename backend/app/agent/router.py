@@ -29,6 +29,11 @@ class SelfImproveRequest(SQLModel):
     model: str = "local"  # 평가·진단에 쓸 모델(로컬 Ollama 기준)
 
 
+class TextToSqlRequest(SQLModel):
+    question: str
+    model: str = "local"  # SQL 생성에 쓸 모델(로컬 Ollama 기준)
+
+
 class ApplyRequest(SQLModel):
     proposal: dict[str, Any]
 
@@ -78,6 +83,24 @@ def agent_self_improve(req: SelfImproveRequest):
 
     def event_stream():
         for event in run_self_improve(req.model):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/text-to-sql")
+def agent_text_to_sql(req: TextToSqlRequest):
+    """Text-to-SQL(SSE) — 자연어 → SELECT 생성(스트리밍) → 읽기전용 가드 → 실행 → 결과.
+
+    3겹 방어(프롬프트·가드·읽기전용 트랜잭션)로 쓰기·DDL을 원천 차단한다. 생성된 SQL은 그대로 공개."""
+    from .text_to_sql import run_text_to_sql
+
+    def event_stream():
+        for event in run_text_to_sql(req.question, req.model):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

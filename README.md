@@ -22,6 +22,7 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 - **MCP 에이전트(클라이언트)** — 위 MCP 서버를 **거꾸로 소비**하는 에이전트. MCP 서버에 접속해 도구를 런타임에 **동적 발견**(`list_tools`)하고 **프로토콜로 호출**(`call_tool`)해 목표 수행 — 하드코딩 도구가 아니라 서버가 알려준 도구로 동작(`/agent/mcp`)
 - **모델 아레나(A/B)** — 같은 질문을 두 로컬 모델(`qwen2.5` 7B vs 3B)에 **동시 스트리밍**해 **첫 응답 지연·완료 시간·근거 경로·답변**을 나란히 비교. 모델 크기의 속도↔품질 트레이드오프를 눈으로 측정(`local_model` 오버라이드, `/ai/arena`)
 - **자가 개선 루프(Self-improving)** — 골든셋 eval을 돌려 **라우팅 회귀를 자동 탐지**하고(답변이 아니라 근거 경로를 채점), 실패 케이스를 LLM에 넘겨 **스스로 근본 원인을 진단하고 고칠 레버(임계값·프롬프트·웹폴백)를 제안**. 측정 → 자기 진단 → 개선안의 폐루프(제안만, 읽기 전용, `/agent/self-improve`)
+- **Text-to-SQL(자연어 DB 질의)** — 자연어 질문을 PostgreSQL **SELECT로 생성**해 ERP DB에 직접 묻고 결과를 표로 렌더. 생성된 SQL을 **그대로 공개**(투명성)하고, **3겹 방어**로 안전 실행 — ① 프롬프트로 SELECT 유도 → ② 코드 가드(denylist·단일문·`;`/주석 차단·LIMIT 강제) → ③ `postgresql_readonly` 트랜잭션 + `statement_timeout`. 쓰기·DDL은 DB 레벨에서 거부(`/agent/text-to-sql`)
 - **RAG 지식 문서 관리** — 문서(PDF·MD·텍스트) 업로드 → 임베딩(`bge-m3`) 색인 → 검색. 챗봇이 사내 규정·매뉴얼을 **근거(출처)와 함께** 답변. 관리 페이지에서 업로드·색인 상태·검색 품질 테스트·삭제까지 제공
 - **근거 라우팅 & 할루시네이션 제어** — 검색·도구 결과를 근거로 자동 주입하고, 근거가 없으면 코드 레벨에서 답변 차단(`RAG_STRICT`). 임베딩 유사도 분포를 측정해 자동주입 임계값을 **0.50**(잡음/신호 사이)으로 캘리브레이션
 - **출처 배지(Provenance)** — 답변마다 근거 출처(🌐 웹 검색 / 📄 사내 문서 / 📊 ERP 데이터 / 🧠 근거 없음)를 표시해 오해를 제거
@@ -96,6 +97,11 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 골든셋 eval을 돌려 **라우팅 회귀를 케이스별로 채점**(답변이 아니라 근거 경로)하고, 실패를 LLM에 넘겨 **스스로 근본 원인을 진단하고 고칠 레버(임계값·프롬프트·웹폴백)를 제안**합니다. 폐루프지만 제안만 하고 코드는 사람이 판단해 적용합니다(읽기 전용).
 
 ![자가 개선 루프가 골든셋 10개 케이스의 pass/fail 표를 보여준 뒤 LLM이 진단과 개선 제안을 생성한 화면](docs/screenshots/self-improve.png)
+
+### 12. Text-to-SQL — 자연어로 DB에 직접 질문
+"월별 주문 건수"처럼 물으면 **PostgreSQL SELECT를 생성**해 ERP DB에 직접 질의하고 결과를 표로 보여줍니다. 생성된 SQL을 그대로 공개하며, **읽기전용 가드**(SELECT만·단일문·LIMIT·`postgresql_readonly` 트랜잭션)로 쓰기·DDL을 원천 차단합니다. 예약어 테이블(`"order"`)도 올바르게 큰따옴표 처리합니다.
+
+![자연어 '월별 주문 건수'를 SELECT로 변환해 읽기전용 가드 통과 배지와 함께 월별 집계 결과를 표로 보여주는 화면](docs/screenshots/text-to-sql.png)
 
 ## 아키텍처
 
@@ -264,6 +270,7 @@ ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io) �
 | POST | `/agent/brief` | 자율 브리핑 에이전트(SSE): 목표 → 다단계 자율 수집 → 종합 |
 | POST | `/agent/mcp` | MCP 에이전트(SSE): MCP 서버 도구 동적 발견 → 프로토콜 호출 → 종합 |
 | POST | `/agent/self-improve` | 자가 개선 루프(SSE): 골든셋 eval → 케이스별 pass/fail → LLM 자가 진단·개선 제안 |
+| POST | `/agent/text-to-sql` | Text-to-SQL(SSE): 자연어 → SELECT 생성 → 읽기전용 가드 → 실행 → 결과 표 |
 | POST/GET | `/integrations/slack/send` · `/integrations/audit` | 알림 전송(확인 후) · 감사 로그 조회 |
 
 전체 스펙은 Swagger UI(`/docs`)에서 확인할 수 있습니다.
