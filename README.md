@@ -7,36 +7,53 @@ Next.js · FastAPI · PostgreSQL 기반의 제조/유통 ERP 프로토타입입�
 
 ## 주요 기능
 
+### 업무(ERP)
+
 - **재고/기준정보** — 품목·단가·안전재고 관리, 초기 재고 등록
 - **주문** — 구매(발주)·판매(수주) 생성, **주문 확정 시 재고 자동 반영 + 전표 생성**
 - **거래처** — 공급처/고객 관리
 - **회계** — 매입/매출 전표, 미수금·미지급금, 계정·경비
 - **인사** — 직원·근태
 - **대시보드** — 매출·매입·재고·정산 요약 지표
+- **권한 관리(RBAC)** — 역할·모듈 권한 정의 + 로그인·메뉴/라우트 접근 제어
+- **외부 연동 & 감사 로그** — Slack/Discord 웹훅 알림(사용자 확인 후 전송) + 모든 도구 호출·전송을 감사 로그(`AuditLog`)에 기록
+
+### AI
+
+**에이전트 & 근거(RAG)**
+
 - **AI 에이전트 ‘원장(元帳)’** — 정체성 + 5단계 리즈닝(의도 분류 → 근거 계획 → 도구 실행 → 자기 점검 → 답변)을 갖춘 RAG 에이전트. **실시간 수치는 도구 / 사내 규정은 문서 / 외부 정보는 웹**으로 스스로 근거 경로를 판단 (Claude API · 로컬 Ollama 모델 라우팅)
-- **실시간 스트리밍 채팅 UX** — 토큰 단위 스트리밍·생성 중 중지(AbortController)·점진적 Markdown 렌더·도구 실행 상태 표시·**멀티 대화(URL 딥링크 `?c=`)**·메시지 가상화·재시도/자동 재연결. 여기에 **자동높이 입력(Shift+Enter 줄바꿈)·답변 복사·다시 생성·‘↓ 최신으로’·토스트 알림** 등 편의 기능과 Playwright E2E 회귀 검증까지 (자세히는 [채팅 프론트엔드](#채팅-프론트엔드-스트리밍-ux) 참고)
-- **Generative UI** — 도구 실행 결과를 텍스트가 아니라 **React 컴포넌트**로 렌더. 재고 조회→표(안전재고 미달 빨강 하이라이트), 대시보드→지표 카드, 주문·거래처→리스트. 백엔드가 `tool_result`(원자료)를 스트리밍하면 도구 이름에 맞는 뷰로 시각화
-- **임베딩 의미 지도** — 품목·문서를 bge-m3로 임베딩한 뒤 **PCA로 2D 투영**해 인터랙티브 산점도로 표시. 뜻이 비슷한 항목이 가까이 모이는 의미 공간을 눈으로 확인(RAG의 ‘의미 검색’ 원리 시각화, `/rag/embedding-map`)
-- **자연어 → 차트(Text-to-Chart)** — "월별 주문 추이 차트로 보여줘"처럼 말하면, 에이전트가 집계 도구(`get_chart`)를 골라 데이터를 조회하고 **막대·선 그래프**로 렌더(Generative UI 확장). 재고·미수금·월별 주문·매출vs매입 지원
-- **MCP 서버** — ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io)로 노출해 Claude Desktop 등 **외부 에이전트가 사내 데이터를 조회** (자세히는 [MCP 서버](#mcp-서버--erp를-외부-에이전트에-노출) 참고)
-- **MCP 에이전트(클라이언트)** — 위 MCP 서버를 **거꾸로 소비**하는 에이전트. MCP 서버에 접속해 도구를 런타임에 **동적 발견**(`list_tools`)하고 **프로토콜로 호출**(`call_tool`)해 목표 수행 — 하드코딩 도구가 아니라 서버가 알려준 도구로 동작(`/agent/mcp`)
-- **모델 아레나(A/B)** — 같은 질문을 두 로컬 모델(`qwen2.5` 7B vs 3B)에 **동시 스트리밍**해 **첫 응답 지연·완료 시간·근거 경로·답변**을 나란히 비교. 모델 크기의 속도↔품질 트레이드오프를 눈으로 측정(`local_model` 오버라이드, `/ai/arena`)
-- **자가 개선 루프(Self-improving)** — 골든셋 eval을 돌려 **라우팅 회귀를 자동 탐지**하고(답변이 아니라 근거 경로를 채점), 실패 케이스를 LLM에 넘겨 **스스로 근본 원인을 진단하고 고칠 레버(임계값·프롬프트·웹폴백)를 제안**. 측정 → 자기 진단 → 개선안의 폐루프(제안만, 읽기 전용, `/agent/self-improve`)
-- **Text-to-SQL(자연어 DB 질의)** — 자연어 질문을 PostgreSQL **SELECT로 생성**해 ERP DB에 직접 묻고 결과를 표로 렌더. 생성된 SQL을 **그대로 공개**(투명성)하고, **3겹 방어**로 안전 실행 — ① 프롬프트로 SELECT 유도 → ② 코드 가드(denylist·단일문·`;`/주석 차단·LIMIT 강제) → ③ `postgresql_readonly` 트랜잭션 + `statement_timeout`. 쓰기·DDL은 DB 레벨에서 거부(`/agent/text-to-sql`)
-- **CLIP 이미지 검색(멀티모달)** — 이미지·텍스트를 **같은 임베딩 공간**에 넣어 말로 이미지를 찾거나(텍스트→이미지) 이미지로 비슷한 이미지를 찾습니다(이미지→이미지). 이미지 인코더는 `clip-ViT-B-32`, **텍스트는 다국어 정렬 모델**(`clip-ViT-B-32-multilingual-v1`)로 한국어 쿼리까지 지원. 기존 RAG와 동일하게 임베딩을 JSONB에 저장하고 numpy 코사인으로 검색(`torch`는 선택적 의존성, `/rag/image/*`)
-- **RAG 지식 문서 관리** — 문서(PDF·MD·텍스트) 업로드 → 임베딩(`bge-m3`) 색인 → 검색. 챗봇이 사내 규정·매뉴얼을 **근거(출처)와 함께** 답변. 관리 페이지에서 업로드·색인 상태·검색 품질 테스트·삭제까지 제공
 - **근거 라우팅 & 할루시네이션 제어** — 검색·도구 결과를 근거로 자동 주입하고, 근거가 없으면 코드 레벨에서 답변 차단(`RAG_STRICT`). 임베딩 유사도 분포를 측정해 자동주입 임계값을 **0.50**(잡음/신호 사이)으로 캘리브레이션
 - **출처 배지(Provenance)** — 답변마다 근거 출처(🌐 웹 검색 / 📄 사내 문서 / 📊 ERP 데이터 / 🧠 근거 없음)를 표시해 오해를 제거
 - **웹 검색(web_search)** — 사내 데이터로 답할 수 없는 외부 정보는 웹 검색으로 라우팅. 로컬 모델의 도구호출 실패는 서버측 폴백 검색으로 보완
+- **RAG 지식 문서 관리** — 문서(PDF·MD·텍스트) 업로드 → 임베딩(`bge-m3`) 색인 → 검색. 챗봇이 사내 규정·매뉴얼을 **근거(출처)와 함께** 답변. 관리 페이지에서 업로드·색인 상태·검색 품질 테스트·삭제까지 제공
+
+**UX & 상호작용**
+
+- **실시간 스트리밍 채팅 UX** — 토큰 단위 스트리밍·생성 중 중지(AbortController)·점진적 Markdown 렌더·도구 실행 상태 표시·**멀티 대화(URL 딥링크 `?c=`)**·메시지 가상화·재시도/자동 재연결. 여기에 **자동높이 입력(Shift+Enter 줄바꿈)·답변 복사·다시 생성·‘↓ 최신으로’·토스트 알림** 등 편의 기능과 Playwright E2E 회귀 검증까지 (자세히는 [채팅 프론트엔드](#채팅-프론트엔드-스트리밍-ux) 참고)
+- **Generative UI** — 도구 실행 결과를 텍스트가 아니라 **React 컴포넌트**로 렌더. 재고 조회→표(안전재고 미달 빨강 하이라이트), 대시보드→지표 카드, 주문·거래처→리스트. 백엔드가 `tool_result`(원자료)를 스트리밍하면 도구 이름에 맞는 뷰로 시각화
 - **화면 컨텍스트 도우미** — 현재 화면을 인식해 사용법을 RAG 근거로 안내하고, 자연어로 등록/수정까지 실행
+
+**자율 에이전트 & 도구 연동**
+
 - **실행(액션) 에이전트** — 자연어 명령 → 구조화 제안 → 사용자 확인 → 실행(plan/apply, human-in-the-loop)
 - **자율 브리핑 에이전트** — 목표를 주면 에이전트가 여러 조회 도구를 **스스로 연쇄 실행**(계획→실행→관찰)해 데이터를 모으고, 구조화된 브리핑(요약·핵심수치·리스크·권장조치)으로 종합. 각 수집 단계는 Generative UI(표·카드)로 표시 (읽기 전용, `/agent/brief`)
-- **외부 연동 & 감사 로그** — Slack/Discord 웹훅 알림(사용자 확인 후 전송) + 모든 도구 호출·전송을 감사 로그(`AuditLog`)에 기록
-- **권한 관리(RBAC)** — 역할·모듈 권한 정의 + 로그인·메뉴/라우트 접근 제어
+- **MCP 서버** — ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io)로 노출해 Claude Desktop 등 **외부 에이전트가 사내 데이터를 조회** (자세히는 [MCP 서버](#mcp-서버--erp를-외부-에이전트에-노출) 참고)
+- **MCP 에이전트(클라이언트)** — 위 MCP 서버를 **거꾸로 소비**하는 에이전트. MCP 서버에 접속해 도구를 런타임에 **동적 발견**(`list_tools`)하고 **프로토콜로 호출**(`call_tool`)해 목표 수행 — 하드코딩 도구가 아니라 서버가 알려준 도구로 동작(`/agent/mcp`)
+
+**데이터 탐색 & 멀티모달**
+
+- **임베딩 의미 지도** — 품목·문서를 bge-m3로 임베딩한 뒤 **PCA로 2D 투영**해 인터랙티브 산점도로 표시. 뜻이 비슷한 항목이 가까이 모이는 의미 공간을 눈으로 확인(RAG의 ‘의미 검색’ 원리 시각화, `/rag/embedding-map`)
+- **자연어 → 차트(Text-to-Chart)** — "월별 주문 추이 차트로 보여줘"처럼 말하면, 에이전트가 집계 도구(`get_chart`)를 골라 데이터를 조회하고 **막대·선 그래프**로 렌더(Generative UI 확장). 재고·미수금·월별 주문·매출vs매입 지원
+- **Text-to-SQL(자연어 DB 질의)** — 자연어 질문을 PostgreSQL **SELECT로 생성**해 ERP DB에 직접 묻고 결과를 표로 렌더. 생성된 SQL을 **그대로 공개**(투명성)하고, **3겹 방어**로 안전 실행 — ① 프롬프트로 SELECT 유도 → ② 코드 가드(denylist·단일문·`;`/주석 차단·LIMIT 강제) → ③ `postgresql_readonly` 트랜잭션 + `statement_timeout`. 쓰기·DDL은 DB 레벨에서 거부(`/agent/text-to-sql`)
+- **CLIP 이미지 검색(멀티모달)** — 이미지·텍스트를 **같은 임베딩 공간**에 넣어 말로 이미지를 찾거나(텍스트→이미지) 이미지로 비슷한 이미지를 찾습니다(이미지→이미지). 이미지 인코더는 `clip-ViT-B-32`, **텍스트는 다국어 정렬 모델**(`clip-ViT-B-32-multilingual-v1`)로 한국어 쿼리까지 지원. 기존 RAG와 동일하게 임베딩을 JSONB에 저장하고 numpy 코사인으로 검색(`torch`는 선택적 의존성, `/rag/image/*`)
+
+**측정 & 실험**
+
+- **모델 아레나(A/B)** — 같은 질문을 두 로컬 모델(`qwen2.5` 7B vs 3B)에 **동시 스트리밍**해 **첫 응답 지연·완료 시간·근거 경로·답변**을 나란히 비교. 모델 크기의 속도↔품질 트레이드오프를 눈으로 측정(`local_model` 오버라이드, `/ai/arena`)
+- **자가 개선 루프(Self-improving)** — 골든셋 eval을 돌려 **라우팅 회귀를 자동 탐지**하고(답변이 아니라 근거 경로를 채점), 실패 케이스를 LLM에 넘겨 **스스로 근본 원인을 진단하고 고칠 레버(임계값·프롬프트·웹폴백)를 제안**. 측정 → 자기 진단 → 개선안의 폐루프(제안만, 읽기 전용, `/agent/self-improve`)
 
 ## 🖼️ AI 기능 데모
-
-> 아래 스크린샷은 GitHub에서 바로 렌더됩니다. (한 페이지 갤러리: [실행 데모 갤러리](https://claude.ai/code/artifact/9c628d5a-4f79-4281-83a5-d3cde5f2ea5f))
 
 실제 실행 화면입니다. (로컬 Ollama `qwen2.5:7b` 기준)
 
@@ -129,7 +146,7 @@ web (Next.js :3000)  ──REST·SSE──▶  api (FastAPI :8000)  ──psycop
 |------|------|
 | 백엔드 | Python 3.12 · FastAPI 0.115 · Uvicorn · SQLModel 0.0.22 · Alembic 1.14 · psycopg2 |
 | 프론트엔드 | TypeScript 5.6 · Next.js 14.2 · React 18.3 · Tailwind CSS 3.4 · TanStack Query 5 · TanStack Virtual 3 |
-| AI | anthropic SDK · httpx · Ollama(로컬 LLM) · `bge-m3` 임베딩(RAG) · `ddgs`(웹 검색) |
+| AI | anthropic SDK · httpx · Ollama(로컬 LLM) · `bge-m3` 임베딩(RAG) · `ddgs`(웹 검색) · MCP(FastMCP) · CLIP(선택: `sentence-transformers`/`torch`, 이미지 검색) |
 | 테스트/CI | Jest·pytest(유닛) · Playwright(E2E) · GitHub Actions(CI) |
 | 인프라 | PostgreSQL 16 · Docker Compose |
 
@@ -180,7 +197,7 @@ DB 데이터를 완전히 초기화하려면 `docker compose down -v`로 볼륨�
 
 - **로컬 실행:** 호스트에서 `ollama serve` + `ollama pull qwen2.5:7b` + `ollama pull bge-m3`(임베딩). 컨테이너에서 호스트 Ollama를 쓰려면 `OLLAMA_BASE_URL=http://host.docker.internal:11434`로 지정.
 - **에이전트 정체성·리즈닝:** 두 경로 모두 `AGENT_IDENTITY` / `REASONING_FRAMEWORK` / `AGENT_RULES` 공유 상수를 사용해 동일한 ‘원장’ 에이전트로 동작합니다.
-- **도구:** ERP 조회(`get_dashboard`, `get_inventory`, `list_orders`, `list_partners`) · 문서 검색(`search_documents`) · 웹 검색(`web_search`). 하나의 도구 정의를 Claude·Ollama 규격으로 변환해 재사용하고, 모든 호출은 감사 로그에 기록됩니다. 최대 6회까지 도구 호출(ReAct)을 반복합니다.
+- **도구:** ERP 조회(`get_dashboard`, `get_inventory`, `list_orders`, `list_partners`) · 집계 차트(`get_chart`) · 문서 검색(`search_documents`) · 웹 검색(`web_search`). 하나의 도구 정의를 Claude·Ollama 규격으로 변환해 재사용하고, 모든 호출은 감사 로그에 기록됩니다. 최대 6회까지 도구 호출(ReAct)을 반복합니다.
 - **스트리밍:** 로컬(Ollama)은 `stream:true`로 **토큰 단위 실시간 전송**, 그 외 경로는 완성 답변을 조각내어 점진적으로 전송(SSE). 근거(문서·도구)가 확보된 경우에만 델타를 실시간으로 흘려 grounding 가드와 공존합니다.
 - **쓰기(실행) 경로:** 데이터 변경은 챗봇이 직접 실행하지 않고 `/agent/plan` → 사용자 확인 → `/agent/apply`(human-in-the-loop)로 분리됩니다.
 
@@ -204,17 +221,17 @@ AI 어시스턴트 화면(`/chat`)은 7단계로 설계·구현했습니다.
 
 ## 테스트
 
-테스트 피라미드를 갖췄습니다 — **유닛(Jest·pytest) → E2E(Playwright) → 도메인 eval**. push마다 **GitHub Actions CI**가 타입체크·유닛테스트를 자동 실행합니다([워크플로](.github/workflows/ci.yml)).
+테스트 피라미드를 갖췄습니다 — **유닛(Jest·pytest) → E2E(Playwright) → 도메인 eval(라우팅·검색)**. push마다 **GitHub Actions CI**가 타입체크·유닛테스트·RAG 검색 게이트를 자동 실행합니다([워크플로](.github/workflows/ci.yml)).
 
 ### 유닛 테스트 (Jest · pytest)
 
 ```bash
 cd frontend && npm test        # Jest — Markdown 렌더러·Generative UI·XSS 방어
-cd backend  && python -m pytest -q   # pytest — 도구 스키마·근거 가드·에이전트 프롬프트
+cd backend  && python -m pytest -q   # pytest — 도구 스키마·근거 가드·SQL 가드·CLIP 코사인
 ```
 
 - **Jest**(프론트): 경량 Markdown 렌더러(굵게/코드/목록·링크 XSS 방어), `ToolResultView`(재고 표·미달 표시·차트) 등 순수 컴포넌트 검증.
-- **pytest**(백엔드): `TOOL_DEFS` 스키마·`get_chart` kind·`_guard_answer`(근거 없으면 차단) 등 DB·LLM 불필요한 순수 로직 검증.
+- **pytest**(백엔드): `TOOL_DEFS` 스키마·`get_chart` kind·`_guard_answer`(근거 없으면 차단)에 더해, **Text-to-SQL 안전 가드**(`guard_sql` — INSERT·DROP·다중문·주석·`FOR UPDATE` 차단, LIMIT 자동 부착)와 **CLIP 코사인 랭킹**(정규화·정렬·top-k)까지 — DB·LLM·torch 불필요한 순수 로직 검증.
 - Jest(유닛)와 Playwright(E2E)는 상호보완 — 유닛은 빠른 함수/컴포넌트, E2E는 브라우저 전체 플로우.
 
 ### E2E (Playwright)
@@ -239,7 +256,15 @@ cd backend && ../.venv/bin/python eval/run_eval.py   # DB + Ollama 필요
 - 답변 텍스트가 아니라 **에이전트가 어떤 근거로 답했는지(라우팅)** 를 채점해, 모델이 흔들려도 회귀(예: 웹 질문에 사내 문서가 딸려오는 근거 오염)를 안정적으로 잡습니다.
 - 임계값·프롬프트를 바꿀 때마다 돌려 회귀를 확인 — 종료코드로 CI 연결 가능. **현재 10/10 통과(라우팅 100%).**
 
-## MCP 서버 — ERP를 외부 에이전트에 노출
+### RAG 검색 품질 게이트 (CI + pre-push)
+
+```bash
+cd backend && python eval/run_rag_eval.py   # 커밋된 fixture 위에서 numpy 코사인만 — Ollama·DB 불필요
+```
+
+- `backend/eval/rag_golden.jsonl`(질문→기대 문서) + `rag_fixture.json`(고정 임베딩)으로, **재현 가능한** 검색 품질 점수를 낸다.
+- 통과율이 `RAG_EVAL_MIN`(기본 0.8) 미만이면 종료코드 1 → **CI `rag-eval` 잡**과 **`.githooks/pre-push` 훅**이 merge/push를 차단한다(우회: `git push --no-verify`).
+- 훅 활성화: `git config core.hooksPath .githooks` (한 번만).
 
 ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Desktop 같은 **외부 MCP 클라이언트**가 이 서버에 연결하면, 챗봇이 쓰는 것과 **동일한 도구**(현황·재고·주문·거래처·문서검색)를 그대로 호출할 수 있습니다.
 
@@ -301,38 +326,46 @@ ERP 조회 도구를 [Model Context Protocol](https://modelcontextprotocol.io) �
 seunghwan-erp/
 ├── docker-compose.yml          # db · api · web 3-컨테이너 정의
 ├── .env.example                # 환경 변수 템플릿
+├── .githooks/pre-push          # RAG 검색 품질 게이트(통과율 미달 시 push 차단)
 ├── backend/
 │   ├── Dockerfile
-│   ├── requirements.txt
+│   ├── requirements.txt        # 기본 의존성
+│   ├── requirements-ml.txt     # 선택: CLIP 이미지 검색(sentence-transformers·torch)
+│   ├── mcp_server.py           # ERP 도구를 MCP 서버로 노출(stdio)
+│   ├── eval/                   # 측정 하네스: run_eval(라우팅)·run_rag_eval(검색 게이트)·골든셋·fixture
+│   ├── tests/                  # pytest(순수 로직: 도구·근거 가드·SQL 가드·CLIP 코사인)
 │   └── app/
 │       ├── main.py             # FastAPI 앱 · lifespan(DB 대기·시드) · CORS · 라우터 등록
 │       ├── database.py         # 엔진 · 테이블 생성
-│       ├── models.py           # SQLModel 테이블 정의 (+ Role · AuditLog 등)
+│       ├── models.py           # SQLModel 테이블 (품목·재고·주문·회계·인사 + Document·DocChunk·ItemImage·AuditLog·Role)
 │       ├── schemas.py          # 요청/응답 스키마
 │       ├── seed.py             # 샘플 데이터
 │       ├── audit.py            # 감사 로그 기록/조회
+│       ├── mcp_client.py       # MCP 클라이언트 에이전트(도구 동적 발견·호출)
 │       ├── routers/            # dashboard · items · partners · orders · employees · roles · accounts · expenses
-│       ├── chat/               # AI 에이전트: router(SSE) · providers(라우팅·리즈닝 프롬프트) · tools
-│       ├── rag/                # RAG: retrieval · embeddings · chunk · extract · router(업로드·검색)
-│       ├── agent/              # 실행 에이전트: router(plan/apply)
+│       ├── chat/               # AI 에이전트: router(SSE) · providers(라우팅·리즈닝·스트리밍) · tools
+│       ├── rag/                # RAG: retrieval · embeddings · chunk · extract · clip_search · router(문서·검색·이미지)
+│       ├── agent/              # 에이전트 라우터: plan/apply · brief · mcp · self_improve · text_to_sql
 │       └── integrations/       # 외부 연동: slack(웹훅) · router(전송·감사 조회)
 └── frontend/
     ├── Dockerfile
     ├── package.json
     ├── playwright.config.ts    # E2E 설정
     ├── e2e/                    # Playwright 테스트(chat.spec.ts)
+    ├── __tests__/             # Jest 유닛(Markdown · ToolResultView)
     └── app/
         ├── providers.tsx       # TanStack Query 프로바이더
         ├── chat/page.tsx       # 스트리밍 채팅(멀티대화·가상화·중지·재시도)
-        ├── components/         # HelpDrawer · CrudManager · AuthProvider · Markdown(경량 렌더러)
+        ├── ai/                 # arena · self-improve · sql · image-search · embedding-map · chart · agent · mcp · documents
+        ├── components/         # Sidebar · HelpDrawer · CrudManager · AuthProvider · Markdown · ToolResultView
         └── lib/                # api.ts · conversations.ts(대화 저장) · permissions.ts
 ```
 
 ## 프로토타입 범위
 
-- **포함:** 핵심 업무 흐름(구매→재고→판매→정산), 화면·데이터 구조 검증, RAG 에이전트(도구·문서·웹 라우팅) · 실시간 스트리밍 채팅 UX(멀티대화·가상화·중지·재시도) · RAG 지식 검색·관리 · 화면 도우미 · 실행(쓰기) 에이전트 · 외부 알림·감사 로그 · 권한 관리(UI 레벨) · E2E 테스트
-- **제외:** API 레벨 인증(현재 접근제어는 UI 레벨), 평가(eval) 하네스, 세금계산서 발행, 실 결제
-- **다음 단계:** “질문→기대출처” 골든셋 기반 eval, 문서 주제별 분리·리랭커로 검색 품질 개선, 다단계(멀티스텝) 에이전틱 워크플로, 스트림 중간 끊김 재개(resume)
+- **포함:** 핵심 업무 흐름(구매→재고→판매→정산), 화면·데이터 구조 검증, RAG 에이전트(도구·문서·웹 라우팅) · 실시간 스트리밍 채팅 UX(멀티대화·가상화·중지·재시도) · RAG 지식 검색·관리 · 화면 도우미 · 실행(쓰기) 에이전트 · MCP 서버/에이전트 · 브리핑 에이전트 · 모델 아레나 · 자가 개선 루프 · Text-to-SQL · CLIP 이미지 검색 · 외부 알림·감사 로그 · 권한 관리(UI 레벨) · 유닛/E2E/라우팅 eval 테스트
+- **제외:** API 레벨 인증(현재 접근제어는 UI 레벨), 세금계산서 발행, 실 결제
+- **다음 단계:** 문서 주제별 분리·리랭커로 검색 품질 개선, 다단계(멀티스텝) 에이전틱 워크플로, 스트림 중간 끊김 재개(resume), API 레벨 인증·감사 강화
 
 자세한 기획은 [`erp-prototype-plan.html`](./erp-prototype-plan.html), AI 챗봇 설계는 [`docs/ai-chatbot-plan.md`](./docs/ai-chatbot-plan.md) 참고.
 
