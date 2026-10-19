@@ -1,0 +1,10 @@
+{"id": "safety-def", "question": "안전재고가 무슨 뜻이야", "expect_keywords": ["안전재고"], "k": 5}
+{"id": "purchase-process", "question": "발주서는 어떻게 작성하나요", "expect_keywords": ["발주", "공급처"], "k": 5}
+{"id": "order-confirm-stock", "question": "수주를 확정하면 재고가 어떻게 되나요", "expect_keywords": ["확정", "재고"], "k": 5}
+{"id": "leadtime", "question": "리드타임이 긴 품목은 어떻게 발주해", "expect_keywords": ["리드타임", "발주"], "expect_doc": "재고·발주 지침", "k": 5}
+{"id": "restock-rule", "question": "현재고가 안전재고보다 적으면 어떻게 되나", "expect_keywords": ["안전재고", "발주"], "k": 5}
+{"id": "travel-domestic", "question": "국내 출장 숙박비 한도가 얼마야", "expect_keywords": ["숙박비", "8만원"], "expect_doc": "출장비 규정", "k": 5}
+{"id": "travel-oversea-air", "question": "해외 출장 항공은 어떤 등급으로 끊어", "expect_keywords": ["이코노미"], "expect_doc": "출장비 규정", "k": 5}
+{"id": "travel-settle", "question": "출장비 정산은 며칠 안에 신청해야 해", "expect_keywords": ["정산", "7일"], "expect_doc": "출장비 규정", "k": 5}
+{"id": "purchase-voucher", "question": "발주를 확정하면 전표가 생기나요", "expect_keywords": ["매입", "전표"], "k": 5}
+{"id": "item-register", "question": "품목은 어떻게 등록하나요", "expect_keywords": ["품목", "등록"], "k": 5}

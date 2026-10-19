@@ -43,3 +43,21 @@ jobs:
       - run: pip install -r requirements.txt pytest
       - name: Unit tests (pytest)
         run: python -m pytest -q
+
+  rag-eval:
+    name: RAG retrieval eval (gate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # eval은 커밋된 fixture(rag_fixture.json) 위에서 numpy 코사인만 돈다 — Ollama·DB 불필요.
+      - run: pip install numpy
+      - name: RAG golden-set eval (통과율 < RAG_EVAL_MIN 이면 실패 → merge 차단)
+        env:
+          RAG_EVAL_MIN: "0.8"
+        run: python eval/run_rag_eval.py
